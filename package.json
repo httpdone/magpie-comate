@@ -1,6 +1,6 @@
 {
   "name": "magpie-comate",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "magpie / OpenCode provider plugin: use your own Baidu Comate (文心快码) license as a provider",
   "homepage": "https://github.com/httpdone/magpie-comate#readme",
   "repository": {

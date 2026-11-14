@@ -13,7 +13,7 @@ const tools = [
 const MCP = { toolMode: 'mcp' }
 
 async function chat(b, messages, { options = MCP, sessions, ...extra } = {}) {
-  const res = await handleChatCompletions({ body: { model: 'auto', tools, messages, ...extra }, license: LICENSE, options, fetchImpl: b.fetch, sessions })
+  const res = await handleChatCompletions({ body: { model: 'glm-5.3_00000000000000000000000000000000', tools, messages, ...extra }, license: LICENSE, options, fetchImpl: b.fetch, sessions })
   return extra.stream ? { res, events: await readSSE(res) } : { res, json: await res.json() }
 }
 

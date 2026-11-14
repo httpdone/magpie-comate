@@ -12,7 +12,7 @@ const tools = [
 const SYS = { role: 'system', content: 'You are terse.' }
 
 async function chat(b, sessions, messages, extra = {}) {
-  const res = await handleChatCompletions({ body: { model: 'auto', messages, ...extra }, license: LICENSE, fetchImpl: b.fetch, sessions })
+  const res = await handleChatCompletions({ body: { model: 'glm-5.3_00000000000000000000000000000000', messages, ...extra }, license: LICENSE, fetchImpl: b.fetch, sessions })
   return extra.stream ? { res, events: await readSSE(res) } : { res, json: await res.json() }
 }
 
@@ -198,7 +198,7 @@ test('streaming turns are cached after the stream ends and reused', async () => 
 test('a cancelled stream caches nothing', async () => {
   const b = createBackend({ executes: [[ev.text('a'), ev.text('b'), ev.text('c', true)]], chunkSize: 4 })
   const store = createSessionStore()
-  const res = await handleChatCompletions({ body: { model: 'auto', stream: true, messages: [{ role: 'user', content: 'hi' }] }, license: LICENSE, fetchImpl: b.fetch, sessions: store })
+  const res = await handleChatCompletions({ body: { model: 'glm-5.3_00000000000000000000000000000000', stream: true, messages: [{ role: 'user', content: 'hi' }] }, license: LICENSE, fetchImpl: b.fetch, sessions: store })
   const reader = res.body.getReader()
   await reader.read()
   await reader.cancel()

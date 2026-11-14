@@ -22,7 +22,7 @@ createServer(async (req, res) => {
   const backend = createBackend({ executes: [toolScript ?? script()] })
   const out = await backend.fetch(`http://x${req.url}`, { method: req.method, headers: req.headers, body: raw || undefined })
   const c = backend.calls[0]
-  console.error(`${req.method} ${c.path.replace(/^\/api\/key\/valid\/.*/, '/api/key/valid/***')} login-name=${c.headers['login-name'] ? 'set' : 'missing'}${c.body?.modelKey ? ' model=' + c.body.modelKey : ''}${c.body?.query ? ' query=' + JSON.stringify(c.body.query.slice(0, 60)) : ''}`)
+  console.error(`${req.method} ${c.path.replace(/^\/api\/key\/valid\/.*/, '/api/key/valid/***')} login-name=${c.headers['login-name'] ? 'set' : 'missing'}${c.body?.modelKey ? ' model=' + c.body.modelKey : ''}${c.body && 'thinkingEnabled' in c.body ? ' thinking=' + c.body.thinkingEnabled : ''}${c.body && 'effort' in c.body ? ' effort=' + c.body.effort : ''}${c.body?.query ? ' query=' + JSON.stringify(c.body.query.slice(0, 60)) : ''}`)
   res.writeHead(out.status, Object.fromEntries(out.headers))
   for await (const chunk of out.body) res.write(chunk)
   res.end()

@@ -1,8 +1,9 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { profileOf, effortsOf, clampLevel, budgetEffort } from '../lib/models.mjs'
 import { createXmlSplitter, buildQuery, buildSystemReminder, normalizeTools, thinkingFor, createNativeCollector, toMagpieModel, matchClientTool } from '../lib/translate.mjs'
 import { parseSSE } from '../lib/comate.mjs'
-import { MODELS } from './mock.mjs'
+import { MODELS, CONFIGURED, GLM, DSF, KIMI } from './mock.mjs'
 
 test('XML splitter cuts tool calls out of text across arbitrary chunk boundaries', () => {
   const full = 'Let me look.<tool_call_call id="call_1" name="read">\n<arguments>\n{"path":"a.txt"}\n</arguments>\n</tool_call_call> and a < b <tool_c'
@@ -56,13 +57,48 @@ test('system reminder carries caller system prompt and tool schemas', () => {
   assert.match(buildSystemReminder([], [], undefined), /No tools are available/)
 })
 
-test('thinking/effort mapping follows the model entry', () => {
-  const glm = MODELS[1]
-  assert.deepEqual(thinkingFor({}, glm), { thinkingEnabled: true, effort: 'max' })
-  assert.deepEqual(thinkingFor({ reasoning_effort: 'medium' }, glm), { thinkingEnabled: true, effort: 'low' })
-  assert.deepEqual(thinkingFor({ reasoning_effort: 'high' }, glm), { thinkingEnabled: true, effort: 'high' })
-  assert.deepEqual(thinkingFor({}, MODELS[2]), { thinkingEnabled: false, effort: 'low' })
-  assert.deepEqual(thinkingFor({ reasoning_effort: 'high' }, undefined), { thinkingEnabled: true, effort: 'high' })
+test('thinking/effort mapping follows the model entry only', () => {
+  const [lv, sw, routed] = CONFIGURED
+  // live entries: no thinkingConfig / effortConfig → nothing sent
+  for (const m of MODELS) {
+    for (const ask of [{}, { reasoning_effort: 'high' }, { reasoning_effort: 'none' }, { thinking: { type: 'enabled', budget_tokens: 30000 } }]) {
+      assert.deepEqual(thinkingFor(ask, m, 'max'), {})
+    }
+  }
+  assert.deepEqual(thinkingFor({}, lv), { effort: 'high' })
+  assert.deepEqual(thinkingFor({ reasoning_effort: 'medium' }, lv), { effort: 'low' })
+  assert.deepEqual(thinkingFor({ reasoning_effort: 'xhigh' }, lv), { effort: 'max' })
+  assert.deepEqual(thinkingFor({ reasoning_effort: 'none' }, lv), { effort: 'high' }, 'cannot be turned off')
+  assert.deepEqual(thinkingFor({ thinking: { type: 'enabled', budget_tokens: 2000 } }, lv), { effort: 'low' })
+  assert.deepEqual(thinkingFor({ thinking: { type: 'enabled', budget_tokens: 30000 } }, lv), { effort: 'max' })
+  assert.deepEqual(thinkingFor({ reasoning_effort: 'minimal' }, sw), { thinkingEnabled: false })
+  assert.deepEqual(thinkingFor({ reasoning: { effort: 'low' } }, sw), { thinkingEnabled: true })
+  assert.deepEqual(thinkingFor({ reasoning_effort: 'none' }, routed), {})
+  // a model not in the list: nothing is guessed from its name
+  assert.deepEqual(thinkingFor({ model: 'glm-6', reasoning_effort: 'high' }, undefined), {})
+})
+
+test('model profiles come straight from the API entry', () => {
+  const [glm, dsf, kimi] = MODELS
+  assert.equal(profileOf(glm).id, GLM)
+  assert.equal(profileOf(glm).context, 1000000)
+  assert.equal(profileOf(dsf).context, 1024000)
+  assert.equal(profileOf(kimi).context, 256000)
+  assert.equal(profileOf(dsf).rate, 0.3)
+  assert.equal(profileOf(glm).thinking, true)
+  assert.deepEqual(effortsOf(profileOf(glm)), [])
+  // missing field → the one generic default, regardless of the id
+  assert.equal(profileOf({ modelId: 'glm-5.3_x', maxContextWindow: null }).context, 128000)
+  assert.equal(profileOf({ modelId: 'glm-5.3_x' }).thinking, false)
+  assert.deepEqual(effortsOf(profileOf(CONFIGURED[0])), ['low', 'high', 'max'])
+  assert.deepEqual(effortsOf(profileOf(CONFIGURED[1])), ['none', 'high'])
+  assert.deepEqual(effortsOf(profileOf(CONFIGURED[2])), [])
+  assert.equal(profileOf({ modelId: 'x', ratio: '1.5x' }).rate, 1.5)
+  assert.equal(profileOf({ modelId: 'x', ratio: 2 }).rate, 2)
+  assert.equal(clampLevel('medium', ['low', 'high']), 'low')
+  assert.equal(clampLevel('low', ['high', 'max']), 'high')
+  assert.equal(budgetEffort(-1), '')
+  assert.equal(budgetEffort(0), 'none')
 })
 
 test('native tool call collector merges appended params', () => {
@@ -76,18 +112,25 @@ test('native tool call collector merges appended params', () => {
 })
 
 test('model mapping', () => {
-  const m = toMagpieModel(MODELS[1], { limit: { context: 1, output: 32000 } })
-  assert.equal(m.id, 'glm-5.3')
+  const m = toMagpieModel(MODELS[0], { limit: { context: 1, output: 32000 } })
+  assert.equal(m.id, GLM)
   assert.equal(m.name, 'GLM-5.3')
-  assert.equal(m.limit.context, 200000)
+  assert.equal(m.limit.context, 1000000)
+  assert.equal(m.limit.output, 32000)
   assert.equal(m.reasoning, true)
-  assert.deepEqual(Object.keys(m.variants), ['low', 'high', 'max'])
-  assert.equal(m.rate, 2)
-  const om = toMagpieModel(MODELS[2], { id: 'auto', api: { id: 'auto', npm: '@ai-sdk/openai-compatible', url: 'u' }, capabilities: { reasoning: false, toolcall: true } })
-  assert.equal(om.api.id, 'kimi-k2.6')
+  assert.equal(m.variants, undefined)
+  assert.equal(m.rate, 1)
+  assert.equal(m.temperature, false)
+  assert.deepEqual(m.modalities.input, ['text'])
+  const om = toMagpieModel(MODELS[2], { api: { id: 'x', npm: '@ai-sdk/openai-compatible', url: 'u' }, capabilities: { reasoning: false, toolcall: true } })
+  assert.equal(om.api.id, KIMI)
   assert.equal(om.api.url, 'u')
-  assert.equal(toMagpieModel(MODELS[2]).variants, undefined)
-  assert.equal(toMagpieModel(MODELS[0]).limit.context, 128000)
+  assert.equal(toMagpieModel(MODELS[1]).rate, 0.3)
+  assert.equal(toMagpieModel(MODELS[1]).id, DSF)
+  const c = toMagpieModel(CONFIGURED[0])
+  assert.deepEqual(Object.keys(c.variants), ['low', 'high', 'max'])
+  assert.equal(c.limit.context, 200000)
+  assert.equal(toMagpieModel(CONFIGURED[2]).reasoning, false)
 })
 
 test('SSE parser: split lines, heartbeats, [DONE], CRLF', async () => {

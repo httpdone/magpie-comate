@@ -4,7 +4,7 @@
 
 把**你自己的** Comate license 接成 [magpie](https://github.com/yetone/magpie) 的一个 provider（`comate`），
 这样经 magpie 路由的 Claude Code、Codex、Gemini CLI、OpenCode 等 Agent 都能用上你账号里可用的模型
-（`comate/auto`、`comate/glm-5.3` 这类，以你账号实际返回为准）。
+（id 原样取自 Comate，带一段后缀，例如 `comate/glm-5.3_<hash>`；以 `magpie models | grep comate` 列出的为准）。
 
 > ⚠️ 仅供个人使用自己的 license。这是绕开官方客户端调用 Comate 的内部接口（非公开 API），
 > 很可能违反百度的服务条款，账号存在被限制/封禁的风险，后果自负。请勿用于共享、转售 license。
@@ -90,7 +90,7 @@ magpie plugin add ~/tools/magpie-comate
 
 ```bash
 magpie plugin
-# github:httpdone/magpie-comate (magpie-comate 0.2.0)  on        ← 方式 B/C 显示的是文件夹路径
+# github:httpdone/magpie-comate (magpie-comate 0.3.0)  on        ← 方式 B/C 显示的是文件夹路径
 #   comate (文心快码 Comate, 1 models)  not signed in · magpie plugin login comate
 ```
 
@@ -123,21 +123,22 @@ magpie plugin login comate
 ```bash
 magpie plugin                     # comate (文心快码 Comate, N models)  signed in
 magpie providers                  # 文心快码 Comate … ● signed in as API key …xxxx
-magpie provider test comate       # ✓ chat … · auto   （发一个极小的请求自检）
-magpie models | grep comate       # 你账号可用的模型：comate/auto、comate/glm-5.3 …
+magpie provider test comate       # ✓ chat … · deepseek-v4-flash_…   （发一个极小的请求自检）
+magpie models | grep comate       # 你账号可用的模型及完整 id，例如 comate/glm-5.3_<hash>
 ```
 
 ### 5. 分配给 Agent
 
 ```bash
-magpie claude comate/auto          # Claude Code 用 Comate 的 auto
-magpie codex  comate/glm-5.3       # Codex 用某个具体模型（以 magpie models 列出的为准）
+# 模型 id 要写完整（含后缀），先用 magpie models | grep comate 查到再复制
+magpie claude comate/glm-5.3_<hash>   # Claude Code 用 GLM-5.3
+magpie codex  comate/<从 magpie models 复制的 id>
 magpie ls                          # 看各 Agent 当前用的模型
 magpie claude default              # 把 Claude Code 恢复成原来的设置
 ```
 
 也可以把 `comate/<model>` 放进路由组（`magpie group add …`）或作为其他 provider 的 fallback
-（`magpie provider fallback <id> comate/auto`），和其他 provider 一样。窗口里在 Agents 页直接选模型也可以。
+（`magpie provider fallback <id> comate/<完整模型 id>`），和其他 provider 一样。窗口里在 Agents 页直接选模型也可以。
 
 ### 6. 选项（可选）
 
@@ -182,7 +183,7 @@ magpie plugin rm magpie-comate          # 卸载插件；方式 B/C 用路径，
 | `magpie plugin` 显示 `not signed in` | 还没登录或已 logout：`magpie plugin login comate` |
 | `magpie: no provider "comate"` | 插件没加载：`magpie plugin` 看是否 `on`；路径装的确认文件夹还在 |
 | `magpie: no plugin "…"`（设置 options 时） | 插件名不对：GitHub 装的用 `magpie-comate`，本地装的用文件夹路径（`magpie plugin` 第一列） |
-| 模型列表只有 `auto` | license 无效或网络不通 Comate；`magpie provider test comate` 看报错 |
+| `comate` 显示 0 个模型 | 还没登录、license 无效或网络不通 Comate；`magpie provider models comate` / `magpie provider test comate` 看报错 |
 | 请求返回 401 | license 失效，`magpie providers` 会标记登录过期，重新 login |
 | 请求返回 429 | Comate 额度用尽，配置 fallback 让 magpie 自动切换 |
 | `plugin add github:…` 报 404 | 仓库地址/网络问题；可改用方式 B（git clone）或 C（zip） |
@@ -226,6 +227,37 @@ cat $sb/opened.txt                                        # → https://comate.b
 m provider test comate
 ```
 
+## 模型参数
+
+模型列表和每个模型的参数**完全取自 Comate 的 `models/available` 接口**，不按模型名猜测、不做别名、没有内置的模型表：
+
+| 参数 | 取值 |
+| --- | --- |
+| 模型 id / 名称 | `modelId` 原样（含后缀，如 `glm-5.3_<hash>`）/ `displayName` |
+| 上下文窗口 | `maxContextWindow` × 1000（接口单位是 K tokens，官方 VS Code 扩展同样 `1e3*Number(maxContextWindow)`）；接口没给时统一 128000 |
+| 最大输出 | 统一 32000（接口没有这个字段；只是声明给 magpie 的上限，不会发给 Comate） |
+| 是否思考 | `supportThinking` |
+| 思考开关 / 档位 | 只看 `thinkingConfig.switchable`、`effortConfig.levels` / `defaultLevel`（官方 comatecli 2.0 读的就是这两个） |
+| 倍率 | `ratio`（如 `"0.3x"`） |
+| 图片 | 插件不转发图片，只声明文本输入 |
+| temperature / top_p / max_tokens | 不转发：`execute` 没有这些字段，官方客户端也不发 |
+
+**思考字段怎么发**（与 comatecli 一致）：只有模型的 `thinkingConfig.switchable` 为 true 才发 `thinkingEnabled`，只有 `effortConfig` 有档位才发
+`effort`（Agent 选的档位夹到可用档位，未选用 `defaultLevel`；magpie 的 `X-Magpie-Effort` 头优先于请求体）。
+**目前（2026-11 实测）所有模型的 `thinkingConfig` / `effortConfig` 都是 null**，所以两个字段都不发，由服务端按模型默认处理。
+
+注意：对没有声明档位但会思考的模型，magpie 会按自己的模型库给一些模型显示档位（例如 GLM-5.3、Deepseek V4.1 Flash 显示 `low/high/max`），
+这是 magpie 自己的行为；插件收到这些档位后不会发给 Comate。
+
+实测（真实 license）`magpie models | grep comate` 节选：
+
+```
+comate/deepseek-v4-flash_<hash>        Deepseek V4 Flash
+comate/ernie-5.5-flash-preview_<hash>  ERNIE 5.5 Flash Preview
+comate/glm-5.3_<hash>                  GLM-5.3  low/high/max
+comate/minimax-m3_<hash>               MiniMax M3
+```
+
 ## 已知限制
 
 - **会话复用依赖客户端原样回传历史**：如果某个 Agent 每轮都改写 system prompt（例如嵌入时间戳）或改写历史消息，就匹配不上，
@@ -241,6 +273,7 @@ m provider test comate
     模型若调用 `skill` 加载这个服务器，插件按官方格式回 schema；调用其它原生工具会被回绝并提示改用 `use_mcp_tool`（最多 3 轮）。
     该模式只在模拟后端上测试过，线上效果需要真实 license 验证；不理想就切回 `xml`。
 - **图片不转发**：消息里的图片会被替换为 `[image omitted]`。
+- **max_tokens / temperature / top_p 不生效**：Comate `execute` 没有这些字段；32000 输出上限是插件自定的（接口不给）。
 - **未接入用量查询**（`magpie quota` 里不显示 Comate 额度）。额度超限时返回 429，magpie 会按 fallback 切换。
 - 依赖 Comate 客户端的非公开接口，百度更新后可能失效；届时需对照新版客户端调整 `lib/comate.mjs`。
 - 只支持 SaaS license 登录；百度内网账号（token / Uuap）、私有化部署的 VPC 接口未适配（私有化可试 `host` 选项）。
@@ -251,7 +284,8 @@ m provider test comate
 | --- | --- |
 | `index.mjs` | magpie/OpenCode 插件入口：provider 声明、license 登录（打开个人中心 → 粘贴 → 校验）、模型列表、loader fetch |
 | `lib/comate.mjs` | Comate 后端客户端：鉴权头、校验、模型、会话/任务、`execute` SSE 解析、错误映射与脱敏 |
-| `lib/translate.mjs` | OpenAI ⇄ Comate：transcript、工具 XML 约定、流式 XML 切分、原生工具调用收集、思考/effort 映射、模型映射 |
+| `lib/models.mjs` | 模型参数：全部取自接口（上下文 K→tokens、思考/档位/倍率），请求档位 → `thinkingEnabled`/`effort` |
+| `lib/translate.mjs` | OpenAI ⇄ Comate：transcript、工具 XML 约定、流式 XML 切分、原生工具调用收集、模型映射 |
 | `lib/handler.mjs` | 处理一次 `/chat/completions`（流式/非流式，含会话续用与失败回退）与 `/models` |
 | `test/toolmode.test.mjs` | `toolMode:"mcp"` 的测试（use_mcp_tool 映射、skill 作答、toolUseResults、XML 兜底） |
 | `lib/sessions.mjs` | 会话复用：消息规范化与链式哈希、LRU+TTL 内存缓存、增量（新消息/工具结果）构造 |
