@@ -259,3 +259,7 @@ m provider test comate
 | `test/` | 单元/集成测试（模拟后端）与本地假 Comate 服务 |
 
 MIT License.
+
+## 社区
+
+有问题、建议，或想一起折腾？欢迎来 **[linux.do](https://linux.do)** 社区交流反馈。
