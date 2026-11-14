@@ -1,0 +1,51 @@
+{
+  "name": "magpie-comate",
+  "version": "0.2.0",
+  "description": "magpie / OpenCode provider plugin: use your own Baidu Comate (文心快码) license as a provider",
+  "homepage": "https://github.com/httpdone/magpie-comate#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/httpdone/magpie-comate.git"
+  },
+  "bugs": {
+    "url": "https://github.com/httpdone/magpie-comate/issues"
+  },
+  "type": "module",
+  "main": "./index.mjs",
+  "bin": {
+    "comate-openai-proxy": "./bin/serve.mjs"
+  },
+  "files": [
+    "index.mjs",
+    "lib",
+    "bin",
+    "README.md",
+    "PROTOCOL.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "serve": "node bin/serve.mjs",
+    "test:bun": "bun test test/"
+  },
+  "keywords": [
+    "opencode",
+    "opencode-plugin",
+    "magpie",
+    "comate",
+    "baidu",
+    "wenxin"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "magpie": {
+    "name": "文心快码 Comate",
+    "maxConcurrency": 2,
+    "summary": {
+      "en": "Your own Baidu Comate license as a provider.",
+      "zh": "用你自己的文心快码 Comate license 作为模型提供方。"
+    }
+  }
+}
