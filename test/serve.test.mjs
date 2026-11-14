@@ -12,11 +12,11 @@ test('standalone proxy: token check, /v1/models, streaming chat', async () => {
     assert.equal((await fetch(`${base}/models`)).status, 401)
     const auth = { authorization: 'Bearer tok' }
     const models = await (await fetch(`${base}/models`, { headers: auth })).json()
-    assert.ok(models.data.some((m) => m.id === 'glm-5.3'))
+    assert.ok(models.data.some((m) => m.id === 'glm-5.3_00000000000000000000000000000000'))
     const res = await fetch(`${base}/chat/completions`, {
       method: 'POST',
       headers: { ...auth, 'content-type': 'application/json' },
-      body: JSON.stringify({ model: 'auto', stream: true, messages: [{ role: 'user', content: 'hi' }] }),
+      body: JSON.stringify({ model: 'glm-5.3_00000000000000000000000000000000', stream: true, messages: [{ role: 'user', content: 'hi' }] }),
     })
     assert.equal(res.status, 200)
     const events = await readSSE(res)
@@ -32,7 +32,7 @@ test('standalone proxy reuses the Comate conversation across turns', async () =>
   const srv = createProxyServer({ license: LICENSE, fetchImpl: b.fetch, sessions: createSessionStore() })
   await new Promise((r) => srv.listen(0, '127.0.0.1', r))
   const url = `http://127.0.0.1:${srv.address().port}/v1/chat/completions`
-  const post = (messages) => fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ model: 'auto', messages }) }).then((r) => r.json())
+  const post = (messages) => fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ model: 'glm-5.3_00000000000000000000000000000000', messages }) }).then((r) => r.json())
   try {
     await post([{ role: 'user', content: 'hi' }])
     const j = await post([{ role: 'user', content: 'hi' }, { role: 'assistant', content: 'hello' }, { role: 'user', content: 'more' }])

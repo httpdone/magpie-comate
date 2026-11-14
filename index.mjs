@@ -30,8 +30,16 @@ const PROVIDER = 'comate'
 // Requests never reach this address: the loader's fetch intercepts them.
 const BASE = 'https://comate.baidu.com/magpie-comate/v1'
 
-const BASE_MODEL = { name: 'Comate Auto', limit: { context: 128000, output: 32000 }, tool_call: true }
-const DEFAULT_MODELS = { auto: { ...BASE_MODEL, id: 'auto' } }
+// Comate has no fixed model ids (they carry a per-deployment suffix, e.g. glm-5.3_<hash>): nothing is
+// declared up front; provider.models lists the account's models from the API after sign-in.
+// provider.models answers OpenCode Model objects: the host reads capabilities / api / variants from them.
+const BASE_MODEL = {
+  limit: { context: 128000, output: 32000 },
+  tool_call: true,
+  api: { url: BASE, npm: '@ai-sdk/openai-compatible' },
+  capabilities: { temperature: false, reasoning: false, attachment: false, toolcall: true, input: { text: true, image: false, audio: false, video: false, pdf: false }, output: { text: true }, interleaved: false },
+}
+const DEFAULT_MODELS = {}
 
 // Per-license model info cache (for thinking/effort decisions), keyed by the license itself
 // in memory only.
@@ -51,6 +59,16 @@ function requestUrl(input) {
     return input instanceof Request ? new URL(input.url) : new URL(String(input))
   } catch {
     return null
+  }
+}
+
+/** A request header from init or the Request (magpie tells the picked effort in X-Magpie-Effort). */
+function headerOf(input, init, name) {
+  try {
+    const own = init?.headers ? new Headers(init.headers).get(name) : null
+    return own ?? (input instanceof Request ? input.headers.get(name) : null) ?? undefined
+  } catch {
+    return undefined
   }
 }
 
@@ -89,7 +107,11 @@ function makeFetch(license, options, sessions) {
       options,
       signal: init?.signal,
       sessions,
-      getModelInfo: async (id) => (await modelsFor(license, options).catch(() => [])).find((m) => m.modelId === id),
+      effortHeader: headerOf(input, init, 'x-magpie-effort'),
+      getModelInfo: async (id) => {
+        const list = await modelsFor(license, options).catch(() => [])
+        return list.find((m) => (m.modelId ?? m.id) === id)
+      },
     })
   }
 }
@@ -189,14 +211,13 @@ export const ComateAuthPlugin = async (_input, options) => {
         }
         modelCache.set(auth.key, { at: Date.now(), list })
         if (!list.length) return provider.models
-        const base = provider.models?.auto ?? BASE_MODEL
+        const base = BASE_MODEL
         const out = {}
         for (const m of list) {
           const id = m?.modelId ?? m?.id
           if (!id) continue
           out[id] = toMagpieModel(m, base)
         }
-        if (!out.auto) out.auto = { ...base, id: 'auto', name: 'Comate Auto' }
         return out
       },
     },

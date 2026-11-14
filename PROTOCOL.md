@@ -17,7 +17,18 @@ npm `@comate/comatecli` 2.0.0 / `@comate/zulu` 1.7.21（`dist/zulu/*.js`，压�
 ## 模型
 - `GET /api/v2/api/models/available?key=<license>&type=ZULU&loopVersion=v2[&zuluVersion=…&source=plugin]`
   → `{"status":"OK","data":[{modelId, displayName, provider, requestType, supportImage, supportThinking, supportAdaptiveThinking, supportEffort, maxContextWindow, ratio, thinkingConfig:{switchable}, effortConfig:{levels:[{value}]}, …}]}`。
-  无效 license 时只返回 `auto`（已实测）。
+  无效 license 时只返回 `auto`（已实测）。有效 license（2026-11-14 实测）返回 15 个模型，**没有 `auto`**：
+  `modelId` 带后缀（如 `glm-5.3_<hash>`），`maxContextWindow` 为 K（1024/1000/512/256/200），
+  `ratio` 为字符串（`"0.1x"`…`"1x"`），`supportThinking` 全为 true，`thinkingConfig` / `effortConfig` 全为 null；
+  另有顶层 `switchable`、`supportEffort`（如 `"max"`/`"medium"`/null）、`modes:["NORMAL","MAX"]` 等字段，官方 comatecli 不读，本插件也不用。
+
+### 模型参数（客户端代码中的用法）
+- `maxContextWindow` 单位是 K tokens：VS Code 扩展 `chat.js` 用 `1e3*Number(maxContextWindow)`，显示为 `200K` / `1M`（≥1024 显示 M）。
+- `ratio` 是计费倍率，原样显示在模型名旁。
+- `requestType`：服务端路由的 `auto`（只在无效 license 时见过）为 `COMATE_DEFAULT_MODE`，其余 `COMATE_MULTIPLE_MODE`。
+- comatecli 2.0：选模型时只有 `thinkingConfig.switchable` 才问思考开关（默认开），只有 `effortConfig.levels` 存在才问档位（默认 `defaultLevel`）；
+  `execute` 只在选了时带 `thinkingEnabled` / `effort`，`auto` 两者都不带。请求体里没有 max_tokens / temperature / top_p。
+- 本插件只用上面这些接口字段，不按模型名推断任何参数。
 
 ## Agent 执行（base：`https://comate.baidu.com/api/aidevops/autocomate/rest/autowork`）
 - `POST /v2/conversation` body=clientInfo → `{code:200, data:{id}}`

@@ -17,11 +17,25 @@ export const ev = {
   quota: () => ({ content: { type: 'QUOTA_EXCEED', detail: { reason: 'daily' } } }),
 }
 
+// Model ids shaped as the live list returns them (<name>_<32 hex>); the hex here is a placeholder, not a real one.
+export const GLM = 'glm-5.3_00000000000000000000000000000000'
+export const DSF = 'deepseek-v4-flash_11111111111111111111111111111111'
+export const KIMI = 'kimi-k2.6-oneapi_22222222222222222222222222222222'
+
+// Three entries shaped like a live GET /api/v2/api/models/available answer (2026-11-14, fields trimmed, ids replaced):
+// no "auto", maxContextWindow in K tokens, ratio a string like "0.3x", thinkingConfig / effortConfig null.
 export const MODELS = [
-  // shape as the live endpoint answers (2026-11-13): most fields may be null
-  { modelId: 'auto', displayName: 'Auto', provider: null, requestType: 'COMATE_DEFAULT_MODE', supportImage: null, supportThinking: null, maxContextWindow: null, ratio: null, thinkingConfig: null, effortConfig: null },
-  { modelId: 'glm-5.3', displayName: 'GLM-5.3', supportThinking: true, thinkingConfig: { switchable: false }, effortConfig: { levels: [{ value: 'low' }, { value: 'high' }, { value: 'max' }] }, maxContextWindow: 200000, ratio: 2 },
-  { modelId: 'kimi-k2.6', displayName: 'Kimi-K2.6', supportThinking: false, contextWindow: 256000 },
+  {"modelId": "glm-5.3_00000000000000000000000000000000", "displayName": "GLM-5.3", "provider": "anthropic", "modelType": "glm-5.3", "requestType": "COMATE_MULTIPLE_MODE", "callProtocol": "STRUCTURED", "supportImage": false, "supportThinking": true, "supportAdaptiveThinking": false, "supportEffort": "max", "switchable": true, "thinkingConfig": null, "effortConfig": null, "maxContextWindow": 1000, "ratio": "1x", "modes": ["NORMAL", "MAX"], "isDefault": false, "official": true, "enabled": true},
+  {"modelId": "deepseek-v4-flash_11111111111111111111111111111111", "displayName": "Deepseek V4 Flash", "provider": "anthropic", "modelType": "deepseek-v4-flash", "requestType": "COMATE_MULTIPLE_MODE", "callProtocol": "STRUCTURED", "supportImage": false, "supportThinking": true, "supportAdaptiveThinking": true, "supportEffort": "medium", "switchable": true, "thinkingConfig": null, "effortConfig": null, "maxContextWindow": 1024, "ratio": "0.3x", "modes": ["NORMAL", "MAX"], "isDefault": false, "official": true, "enabled": true},
+  {"modelId": "kimi-k2.6-oneapi_22222222222222222222222222222222", "displayName": "Kimi-K2.6", "provider": "new_api", "modelType": "kimi-k2.6-oneapi", "requestType": "COMATE_MULTIPLE_MODE", "callProtocol": "STRUCTURED", "supportImage": true, "supportThinking": true, "supportAdaptiveThinking": false, "supportEffort": null, "switchable": true, "thinkingConfig": null, "effortConfig": null, "maxContextWindow": 256, "ratio": "1x", "modes": ["NORMAL", "MAX"], "isDefault": false, "official": true, "enabled": true},
+]
+
+// Not seen live: the same shape with thinkingConfig / effortConfig filled in (the fields comatecli reads),
+// to test that path. Only used by tests that pass them in directly.
+export const CONFIGURED = [
+  { modelId: 'x-levels_00000000000000000000000000000001', displayName: 'X Levels', requestType: 'COMATE_MULTIPLE_MODE', supportThinking: true, thinkingConfig: { switchable: false }, effortConfig: { levels: [{ value: 'low' }, { value: 'high' }, { value: 'max' }], defaultLevel: 'high' }, maxContextWindow: 200, ratio: '2x' },
+  { modelId: 'x-switch_00000000000000000000000000000002', displayName: 'X Switch', requestType: 'COMATE_MULTIPLE_MODE', supportThinking: true, thinkingConfig: { switchable: true }, effortConfig: null, maxContextWindow: 128, ratio: '0.5x' },
+  { modelId: 'x-routed', displayName: 'X Routed', requestType: 'COMATE_DEFAULT_MODE', supportThinking: true, thinkingConfig: { switchable: true }, effortConfig: null, maxContextWindow: null, ratio: null },
 ]
 
 /**
@@ -29,7 +43,7 @@ export const MODELS = [
  * @param {Array<string|Array>} o.executes  one SSE script per /execute call (array of events or raw string)
  * @param {boolean} o.badLicense
  */
-export function createBackend({ executes = [], badLicense = false, chunkSize = 7 } = {}) {
+export function createBackend({ executes = [], badLicense = false, chunkSize = 7, models = MODELS } = {}) {
   const calls = []
   let execN = 0
   let convN = 0
@@ -43,7 +57,7 @@ export function createBackend({ executes = [], badLicense = false, chunkSize = 7
     const p = url.pathname
     if (p.startsWith('/api/key/valid/')) return json({ status: 'OK', data: !badLicense && decodeURIComponent(p.split('/').pop()) === LICENSE })
     if (headers['login-name'] !== encodeURIComponent(LICENSE) || badLicense) return json({ code: 401, message: 'license invalid' })
-    if (p === '/api/v2/api/models/available') return json({ status: 'OK', data: MODELS })
+    if (p === '/api/v2/api/models/available') return json({ status: 'OK', data: models })
     if (p.endsWith('/rest/autowork/v2/conversation')) return json({ code: 200, data: { id: 111 + convN++ } })
     if (p.endsWith('/rest/autowork/v2/task')) return json({ code: 200, data: { taskId: 222 + taskN++ } })
     if (p.endsWith('/rest/autowork/v2/execute')) {

@@ -28,7 +28,7 @@ test('config hook declares the provider without overwriting user config', async 
   const cfg = {}
   await hooks.config(cfg)
   assert.equal(cfg.provider.comate.npm, '@ai-sdk/openai-compatible')
-  assert.ok(cfg.provider.comate.models.auto)
+  assert.deepEqual(cfg.provider.comate.models, {}, 'no model ids are made up before sign-in')
   const mine = { provider: { comate: { name: 'mine' } } }
   await hooks.config(mine)
   assert.equal(mine.provider.comate.name, 'mine')
@@ -79,13 +79,47 @@ test('provider.models lists the account models; a refused license marks the sign
   const cfg = {}
   await hooks.config(cfg)
   const models = await hooks.provider.models(cfg.provider.comate, { auth: { type: 'api', key: LICENSE } })
-  assert.deepEqual(Object.keys(models), ['auto', 'glm-5.3', 'kimi-k2.6'])
-  assert.equal(models['glm-5.3'].reasoning, true)
-  assert.equal(models['kimi-k2.6'].limit.context, 256000)
+  assert.deepEqual(Object.keys(models), ['glm-5.3_00000000000000000000000000000000', 'deepseek-v4-flash_11111111111111111111111111111111', 'kimi-k2.6-oneapi_22222222222222222222222222222222'])
+  const glm = models['glm-5.3_00000000000000000000000000000000']
+  assert.equal(glm.name, 'GLM-5.3')
+  assert.equal(glm.reasoning, true)
+  assert.equal(glm.limit.context, 1000000)
+  assert.equal(glm.limit.output, 32000)
+  assert.equal(glm.variants, undefined, 'no effortConfig / thinkingConfig → no variants')
+  assert.equal(glm.rate, 1)
+  assert.equal(glm.temperature, false)
+  assert.equal(models['deepseek-v4-flash_11111111111111111111111111111111'].limit.context, 1024000)
+  assert.equal(models['deepseek-v4-flash_11111111111111111111111111111111'].rate, 0.3)
+  assert.equal(models['kimi-k2.6-oneapi_22222222222222222222222222222222'].limit.context, 256000)
   useBackend({ badLicense: true })
   await assert.rejects(hooks.provider.models(cfg.provider.comate, { auth: { type: 'api', key: LICENSE } }), (e) => e.signIn === 'expired')
   // not signed in → the declared list
   assert.equal(await hooks.provider.models(cfg.provider.comate, {}), cfg.provider.comate.models)
+})
+
+test('loader fetch passes X-Magpie-Effort; model ids are matched exactly', async () => {
+  const { CONFIGURED } = await import('./mock.mjs')
+  const L = CONFIGURED[0].modelId
+  const send = async (model) => {
+    const be = useBackend({ executes: [[ev.text('pong', true)]], models: CONFIGURED })
+    mod._internal.modelCache.clear()
+    const hooks = await mod.ComateAuthPlugin({}, undefined)
+    const l = await hooks.auth.loader(async () => ({ type: 'api', key: LICENSE }))
+    const res = await l.fetch(`${l.baseURL}/chat/completions`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-magpie-effort': 'xhigh' },
+      body: JSON.stringify({ model, messages: [{ role: 'user', content: 'hi' }] }),
+    })
+    await res.text()
+    return be.calls.find((c) => c.path.endsWith('/v2/execute')).body
+  }
+  let ex = await send(L)
+  assert.equal(ex.effort, 'max')
+  assert.equal(ex.modelKey, L)
+  // a shortened id is not aliased to the listed one: sent as-is, no thinking fields
+  ex = await send('x-levels')
+  assert.equal(ex.modelKey, 'x-levels')
+  assert.equal('effort' in ex, false)
 })
 
 test('loader fetch answers chat/completions through Comate', async () => {
@@ -96,7 +130,7 @@ test('loader fetch answers chat/completions through Comate', async () => {
   const res = await l.fetch(`${l.baseURL}/chat/completions`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', authorization: 'Bearer comate-license-in-plugin' },
-    body: JSON.stringify({ model: 'auto', messages: [{ role: 'user', content: 'ping' }] }),
+    body: JSON.stringify({ model: 'glm-5.3_00000000000000000000000000000000', messages: [{ role: 'user', content: 'ping' }] }),
   })
   assert.equal(res.status, 200)
   assert.equal((await res.json()).choices[0].message.content, 'pong')
