@@ -277,7 +277,7 @@ comate/minimax-m3_<hash>               MiniMax M3
     `use_mcp_tool` 调用，**调用以结构化 FUNCTION_CALL 事件返回**、结果按官方格式放进 `toolUseResults`；XML 仍作为兜底被解析。
     模型若调用 `skill` 加载这个服务器，插件按官方格式回 schema；调用其它原生工具会被回绝并提示改用 `use_mcp_tool`（最多 3 轮）。
     该模式只在模拟后端上测试过，线上效果需要真实 license 验证；不理想就切回 `xml`。
-- **图片不转发**：消息里的图片会被替换为 `[image omitted]`。
+- **图片**：`supportImage: true` 的模型会转发图片——先把图片 `POST …/rest/autowork/v1/file/upload` 换成服务端 id，再放进 `contexts: [{type:"IMAGE", imageIds:[…]}]`；其余模型仍替换为 `[image omitted]`。只收内联图片（`data:` URL 或 base64），png/jpeg/gif/webp。
 - **max_tokens / temperature / top_p 不生效**：Comate `execute` 没有这些字段；32000 输出上限是插件自定的（接口不给）。
 - **未接入用量查询**（`magpie quota` 里不显示 Comate 额度）。额度超限时返回 429，magpie 会按 fallback 切换。
 - 依赖 Comate 客户端的非公开接口，百度更新后可能失效；届时需对照新版客户端调整 `lib/comate.mjs`。
