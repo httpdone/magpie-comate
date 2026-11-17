@@ -1,4 +1,5 @@
-# magpie-comate —— 在 magpie 里用你自己的文心快码（Baidu Comate）license，百度搭子（Baidu Dumate）与文心快码共享订阅权益，文心快码有着更清晰的模型指定，所以我们开发了这个项目。
+# 文心快码 （Baidu Comate） 与 百度搭子（Baidu Dumate）权益 magpie 反代
+magpie-comate —— 在 magpie 里用你自己的文心快码（Baidu Comate）license，百度搭子（Baidu Dumate）与文心快码共享订阅权益，文心快码有着更清晰的模型指定，所以我们开发了这个项目。
 
 仓库：<https://github.com/httpdone/magpie-comate> · 问题反馈：<https://github.com/httpdone/magpie-comate/issues>
 
