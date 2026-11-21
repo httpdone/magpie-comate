@@ -190,6 +190,8 @@ magpie plugin options ~/tools/magpie-comate '{"host":"https://comate.baidu.com",
 
 Comate license 不能用于签到接口。推荐选择 Cookie 登录并粘贴含非空 `bce-sessionid` 的百度 Cookie，保存在该账号的 `metadata.checkinCookie`；不要求包含 `bce-user-info`。签到凭据优先级为：**插件选项 `checkinCookie` > 账号 metadata 中的签到 Cookie > 百度搭子桌面端登录态**；旧账号没有 metadata 时仍可使用桌面端。显式配置但无效的签到 Cookie 会报错，不会悄悄切换账号。
 
+Cookie 含 `BDUSS` 时签到网页端（`dumate.baidu.com`）；同时有 `bce-sessionid` 与 `bce-user-info`（CSRF）时才签到 PC 端（`console.bce.baidu.com`），缺少 CSRF 会自动跳过 PC 端，不再误报过期。两端领取状态独立，通常网页端 200 积分、PC 端额外 300 积分，实际以服务端为准；结果分别显示两端状态，新增积分相加。一端失败不影响另一端领取；全部失败才报告失败，全部已领才报告今日已签到。
+
 使用手动 license 登录，或 Cookie 不含 `bce-sessionid` 时，请用**同一百度账号**登录百度搭子桌面端，插件会只读复用本机登录态（Windows：`%APPDATA%/qianfan-desktop-app`；macOS：`~/Library/Application Support/qianfan-desktop-app`；Linux：`${XDG_CONFIG_HOME:-~/.config}/qianfan-desktop-app`；可用 `DUMATE_USER_DATA_DIR` 覆盖）。也可以设置优先使用的 `checkinCookie` 选项：
 
 ```bash

@@ -59,14 +59,103 @@ test('claim verifies issuance and calculates actual delta with console POST head
   assert.equal(post.headers.Accept, 'application/json')
 })
 
-test('pasted session-only Cookie claims without bce-user-info or a domain attribute', async () => {
-  const m = mock([{ hasIssued: false, totalPoints: 10 }, {}, { hasIssued: true, totalPoints: 20 }], {})
+test('session-only Cookie skips PC silently without csrf and makes no requests', async () => {
+  const m = mock([], {})
   const result = await m.run(async () => ({ type: 'api', key: 'fake-license', metadata: { checkinCookie: 'bce-sessionid=fake-session' } }))
+  assert.equal(result.outcome, 'inactive')
+  assert.equal(m.calls.length, 0)
+})
+
+test('web claims with pasted Cookie and web headers while PC is skipped without csrf', async () => {
+  const pasted = 'BDUSS=fake-passport=; bce-sessionid=fake-session; BAIDUID=fake-id'
+  const m = mock([{ hasIssued: false, totalPoints: 10 }, true, { hasIssued: true, totalPoints: 210 }], {})
+  const result = await m.run(async () => ({ type: 'api', key: 'fake-license', metadata: { checkinCookie: pasted } }))
   assert.equal(result.outcome, 'claimed')
-  assert.equal(result.credit, 10)
+  assert.equal(result.credit, 200)
+  assert.match(result.message, /网页端.*\+200/)
+  assert.doesNotMatch(result.message, /PC/)
   assert.equal(m.calls.length, 3)
-  assert.ok(m.calls.every((call) => call.headers.Cookie === 'bce-sessionid=fake-session'))
-  assert.equal(m.calls[1].headers.csrftoken, '')
+  const id = m.calls[0].headers['x-dumate-device-id']
+  assert.match(id, /^1\|web\.[0-9a-f-]{36}$/)
+  for (const call of m.calls) {
+    assert.ok(call.url.startsWith('https://dumate.baidu.com/api/dumate/points/loginBonus'))
+    assert.equal(call.headers.Cookie, pasted)
+    assert.equal(call.headers.Origin, 'https://dumate.baidu.com')
+    assert.equal(call.headers.Referer, 'https://dumate.baidu.com/app')
+    assert.equal(call.headers.Accept, 'application/json')
+    assert.equal(call.headers['Content-Type'], 'application/json')
+    assert.equal(call.headers['dumate-version'], '1.0.0')
+    assert.equal(call.headers['x-dumate-client-type'], 'web')
+    assert.equal(call.headers['x-dumate-device-id'], id)
+    assert.equal(call.headers.csrftoken, undefined)
+  }
+  assert.equal(m.calls[1].body, '{}')
+  assert.equal(m.calls[1].method, 'POST')
+})
+
+test('web already done uses one status GET; BDUSS-only option is sufficient', async () => {
+  const m = mock([{ hasIssued: true }], { checkinCookie: 'BDUSS=fake-passport' })
+  const result = await m.run()
+  assert.equal(result.outcome, 'done')
+  assert.match(result.message, /网页端.*今日已签到/)
+  assert.equal(m.calls.length, 1)
+  assert.equal(m.calls[0].method, undefined)
+})
+
+test('web and PC claim independently and sum point deltas', async () => {
+  const m = mock([
+    { hasIssued: false, totalPoints: 10 }, true, { hasIssued: true, totalPoints: 210 },
+    { hasIssued: false, totalPoints: 210 }, true, { hasIssued: true, totalPoints: 510 },
+  ], { checkinCookie: 'BDUSS=fake-passport; ' + cookie })
+  const result = await m.run()
+  assert.equal(result.outcome, 'claimed')
+  assert.equal(result.credit, 500)
+  assert.match(result.message, /网页端.*\+200.*PC 端.*\+300/)
+  assert.equal(m.calls.length, 6)
+  assert.ok(m.calls[0].url.startsWith('https://dumate.baidu.com/'))
+  assert.ok(m.calls[3].url.startsWith('https://console.bce.baidu.com/'))
+  assert.equal(m.calls[4].headers.csrftoken, 'csrf:secret')
+})
+
+test('web and PC failures do not prevent the other end claiming', async () => {
+  const failure = () => new Response(JSON.stringify({ success: false, message: { global: '登录凭证已过期，请重新登录' } }))
+  for (const failed of ['web', 'pc']) {
+    const success = [{ hasIssued: false, totalPoints: 0 }, true, { hasIssued: true, totalPoints: 200 }]
+    const m = mock(failed === 'web' ? [failure(), ...success] : [...success, {}, failure()], { checkinCookie: 'BDUSS=fake-passport; ' + cookie })
+    const result = await m.run()
+    assert.equal(result.outcome, 'claimed')
+    assert.equal(result.credit, 200)
+    assert.equal(result.signIn, undefined)
+    assert.match(result.message, /网页端.*PC 端/)
+    assert.doesNotMatch(result.message, /\[object Object\]/)
+  }
+})
+
+test('combined outcomes require all done or all failed; partial completion stays inactive', async () => {
+  const options = { checkinCookie: 'BDUSS=fake-passport; ' + cookie }
+  const failure = () => new Response(JSON.stringify({ success: false, message: { global: '登录凭证已过期' } }))
+  assert.equal((await mock([{ hasIssued: true }, { hasIssued: true }], options).run()).outcome, 'done')
+  const failed = await mock([failure(), failure()], options).run()
+  assert.equal(failed.outcome, 'failed')
+  assert.equal(failed.signIn, 'expired')
+  assert.equal((await mock([{ hasIssued: true }, failure()], options).run()).outcome, 'inactive')
+  assert.equal((await mock([{}, true, { hasIssued: false }, { hasIssued: true }], options).run()).outcome, 'inactive')
+})
+
+test('object errors prefer global or first string, are redacted and detect expired PC POST', async () => {
+  for (const detail of [{ global: '登录凭证已过期，请重新登录' }, { other: '登录凭证已过期' }]) {
+    const m = mock([{}, new Response(JSON.stringify({ success: false, message: detail }))])
+    const result = await m.run()
+    assert.equal(result.outcome, 'failed')
+    assert.equal(result.signIn, 'expired')
+    assert.doesNotMatch(result.message, /\[object Object\]/)
+  }
+  for (const detail of [{ global: 'session-secret csrf:secret global error', other: 'ignored' }, { code: 123, other: 'session-secret first string' }]) {
+    const result = await mock([{}, new Response(JSON.stringify({ code: 1, message: detail }))]).run()
+    assert.equal(result.outcome, 'failed')
+    assert.match(result.message, /global error|first string/)
+    assert.doesNotMatch(result.message, /session-secret|csrf:secret|\[object Object\]/)
+  }
 })
 
 test('POST accepted but no issuance is inactive, including failed verification', async () => {
@@ -132,11 +221,14 @@ test('old auth without metadata falls back to desktop', async () => {
   let reads = 0
   const m = mock([{ hasIssued: true }], {}, () => {
     reads++
-    return [{ name: 'bce-sessionid', value: 'fake-desktop', domain: '.bce.baidu.com' }]
+    return [
+      { name: 'bce-sessionid', value: 'fake-desktop', domain: '.bce.baidu.com' },
+      { name: 'bce-user-info', value: 'fake-csrf', domain: '.bce.baidu.com' },
+    ]
   })
   assert.equal((await m.run()).outcome, 'done')
   assert.equal(reads, 1)
-  assert.equal(m.calls[0].headers.Cookie, 'bce-sessionid=fake-desktop')
+  assert.equal(m.calls[0].headers.Cookie, 'bce-sessionid=fake-desktop; bce-user-info=fake-csrf')
 })
 
 test('invalid metadata fails without desktop fallback and metadata secrets are redacted', async () => {
@@ -146,7 +238,7 @@ test('invalid metadata fails without desktop fallback and metadata secrets are r
   assert.equal(result.outcome, 'failed')
   assert.doesNotMatch(result.message, /session-secret|csrf:secret/)
   const invalid = mock([], {}, () => assert.fail('no desktop fallback'))
-  assert.equal((await invalid.run(async () => ({ metadata: { checkinCookie: 'BDUSS=fake-passport' } }))).outcome, 'failed')
+  assert.equal((await invalid.run(async () => ({ metadata: { checkinCookie: 'other=fake' } }))).outcome, 'failed')
 })
 
 test('desktop fallback filters and quotes POST cookies by domain', async () => {
