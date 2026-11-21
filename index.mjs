@@ -4,7 +4,7 @@
  * magpie sends this provider OpenAI Chat Completions (npm "@ai-sdk/openai-compatible");
  * the loader's fetch answers them with Comate's agent API (see lib/handler.mjs).
  *
- * Sign-in: two "oauth" methods of the "code" kind, for Cookie or license input.
+ * Sign-in: two "oauth" methods of the "code" kind, plus a masked Cookie/license form.
  * Cookie login opens Dumate and keeps the license key and optional check-in Cookie metadata.
  * License login opens Comate's 个人中心
  * (https://comate.baidu.com/zh/user, or options.licenseUrl) where the user copies the
@@ -217,8 +217,8 @@ export const ComateAuthPlugin = async (_input, options) => {
       methods: [
         {
           type: 'oauth',
-          label: 'Baidu Cookie (open Dumate to copy it)',
-          labels: { zh: '百度 Cookie（自动打开百度搭子复制）', 'zh-TW': '百度 Cookie（自動打開百度搭子複製）' },
+          label: '百度 Cookie（打开百度搭子复制）',
+          labels: { zh: '百度 Cookie（打开百度搭子复制）', 'zh-TW': '百度 Cookie（打開百度搭子複製）' },
           authorize: async () => {
             const own = typeof opts.cookieUrl === 'string' ? opts.cookieUrl.trim() : ''
             const url = /^https?:\/\//i.test(own) ? own : 'https://dumate.baidu.com'
@@ -235,9 +235,18 @@ export const ComateAuthPlugin = async (_input, options) => {
           // tab in magpie web, the default browser from the app and `magpie plugin login`,
           // the link printed when it can't), then asks for the "code", the license copied there.
           type: 'oauth',
-          label: 'Comate license (copy it from your Comate account page)',
-          labels: { zh: 'Comate license（自动打开个人中心复制）', 'zh-TW': 'Comate license（自動打開個人中心複製）' },
+          label: 'Comate license（从个人中心复制）',
+          labels: { zh: 'Comate license（从个人中心复制）', 'zh-TW': 'Comate license（從個人中心複製）' },
           authorize: async () => signInStep(opts),
+        },
+        {
+          type: 'api',
+          label: '百度 Cookie / license（密码表单，不打开网页）',
+          prompts: [
+            { type: 'password', key: 'cookie', message: '百度 Cookie（dumate.baidu.com 登录后复制，含 BDUSS 与 bce-sessionid）', placeholder: '可选；留空可手动填写 license 并复用百度搭子桌面端签到' },
+            { type: 'password', key: 'license', message: 'Comate license（填了 Cookie 可留空，自动获取）', placeholder: '可选；Cookie 与 license 至少填写一项' },
+          ],
+          authorize: (inputs, { signal } = {}) => signInForm(inputs, opts, signal),
         },
       ],
       async loader(getAuth) {

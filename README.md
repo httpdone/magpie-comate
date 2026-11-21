@@ -56,7 +56,7 @@ OpenAI 风格的客户端每次都会重发完整历史。插件把“我们回�
 ### 1. 前提
 
 - **magpie**：本插件在 magpie `0.1.4026` 上实测（`magpie --version` 查看；旧版本先 `magpie update`）。
-  登录使用 OpenCode 插件 oauth「code」方式，分别支持百度 Cookie 与手动 license；较早的 Magpie 若不支持，请先升级。
+  登录提供两种 OpenCode 插件 oauth「code」方式，以及需要支持 `password` prompts 的新版 Magpie 的密码表单；旧版请先升级。
 - **Bun 不用自己装**：magpie 第一次加载插件时会自动下载它自带的 Bun（会提示 `Downloading Bun …, which plugins run on…`）。
 - **git**：只有「从 GitHub 安装」需要。
 - **Node ≥ 18**：只在跑测试或独立代理（`bin/serve.mjs`）时需要，插件本身不需要。
@@ -105,14 +105,14 @@ magpie plugin
 magpie plugin login comate
 ```
 
-默认第一项为 **百度 Cookie（自动打开百度搭子复制）**：
+默认第一项为 **百度 Cookie（打开百度搭子复制）**：
 
 1. Magpie 会自动打开 [百度搭子](https://dumate.baidu.com)（可用 `cookieUrl` 选项修改；没自动打开时按提示手动访问）。
 2. 登录后按 F12 打开 DevTools → Network，刷新页面，选择请求，在 Request Headers 中复制完整 Cookie 请求头的值，回到 Magpie 粘贴到 `Code:` 输入框。不要用 `document.cookie`，它读不到 httpOnly 登录凭据。
 3. 此方式只接受 Cookie，必须含非空 `BDUSS`；插件通过 `GET /api/user` 自动获取 license，再通过 `GET /api/key/valid/<license>` 校验，不会进行自动 SSO。需要手动填写 license 时请选择下面的第二种登录方式。
 4. license 仍保存为账号的 key，模型列表和聊天不变。Cookie 含非空 `bce-sessionid` 时，完整 Cookie 保存在该账号的 `metadata.checkinCookie`；只有 `BDUSS` 而没有 `bce-sessionid` 也可登录，但不保存 Cookie，签到回退到桌面端（插件选项仍优先）。
 
-也可以选择原有 **Comate license（自动打开个人中心复制）**，继续只用 license 登录：
+第二项 **Comate license（从个人中心复制）**，继续只用 license 登录：
 
 1. magpie 会**自动在浏览器新标签页打开** [Baidu Comate · 个人中心](https://comate.baidu.com/zh/user)；
    打不开（服务器 / Docker / 无桌面）时终端会打印这个链接，手动打开即可。
@@ -120,11 +120,17 @@ magpie plugin login comate
 3. 回到终端，在 `Code:` 后面粘贴 license，回车。插件先用 `GET /api/key/valid/<license>` 校验，通过后显示
    `✓ signed in to 文心快码 Comate`。
 
-在 magpie 窗口里（桌面版或 `magpie web`）点 comate 的登录按钮，可选择同样两种方式。旧账号无需重新登录，只有需要保存账号专属签到 Cookie 时才需重新登录选择 Cookie 方式。
+第三项 **百度 Cookie / license（密码表单，不打开网页）** 适合希望隐藏输入的用户：
+
+- Cookie 与 license 均为密码框，均可留空，但至少填写一项；不会自动打开网页。
+- 只填 Cookie 时通过 `/api/user` 自动获取 license（需要非空 `BDUSS`）；填写 license 时直接校验，不调用 `/api/user`。
+- Cookie 含非空 `bce-sessionid` 时保存到账号的 `metadata.checkinCookie`；否则不保存 Cookie，签到回退到桌面端（插件选项仍优先）。
+
+在 magpie 窗口里（桌面版或 `magpie web`）点 comate 的登录按钮，可选择同样三种方式。旧账号无需重新登录，只有需要保存账号专属签到 Cookie 时才需重新登录选择 Cookie 方式或密码表单。
 
 注意：
 
-- 两种方式使用的 `Code:` 输入框都不是密码框，终端可能**显示**粘贴的 Cookie 或 license。请勿在共享屏幕或录屏时输入，也不要把内容粘贴到命令参数或日志中。
+- 前两种方式使用的 `Code:` 输入框都不是密码框，终端可能**显示**粘贴的 Cookie 或 license。希望隐藏输入时请选择第三种密码表单；请勿把凭据粘贴到命令参数或日志中。
 - license 由 magpie 保存在 `~/.config/magpie/plugin-auth.json`（权限 600），作为该账号的 key；
   **不会写进本项目目录，不进日志，也不会出现在错误信息里**（会被替换成 `***`）。`magpie providers` 里只显示末四位。
 - 换 license：`magpie plugin logout comate` 后重新 login。

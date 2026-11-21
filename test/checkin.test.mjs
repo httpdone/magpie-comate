@@ -181,7 +181,7 @@ test('Comate plugin exposes checkin without changing license auth', async () => 
   const hooks = await ComateAuthPlugin({}, { checkinCookie: 'invalid' })
   assert.equal(typeof hooks.auth.checkin, 'function')
   assert.equal((await hooks.auth.checkin(auth)).outcome, 'failed')
-  assert.equal(hooks.auth.methods.length, 2)
+  assert.equal(hooks.auth.methods.length, 3)
 })
 
 test('desktop cookie decryption and discovery on each OS, override and corrupt data', () => {
