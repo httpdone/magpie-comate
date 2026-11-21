@@ -22,6 +22,7 @@
  *                  "mcp" (experimental): tools exposed as one MCP server, called via Comate's use_mcp_tool
  */
 import { createClient, ComateError, redact } from './lib/comate.mjs'
+import { checkin } from './lib/checkin.mjs'
 import { handleChatCompletions } from './lib/handler.mjs'
 import { toMagpieModel } from './lib/translate.mjs'
 import { createSessionStore, SESSION_DEFAULTS } from './lib/sessions.mjs'
@@ -179,6 +180,7 @@ export const ComateAuthPlugin = async (_input, options) => {
     auth: {
       provider: PROVIDER,
       maxConcurrency: 2,
+      checkin: (getAuth) => checkin(getAuth, { options: opts }),
       methods: [
         {
           // An "oauth" method whose sign-in page is Comate's 个人中心: magpie opens it (a new

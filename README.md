@@ -169,6 +169,20 @@ magpie plugin options ~/tools/magpie-comate '{"host":"https://comate.baidu.com",
 | `ide` / `ideVersion` / `pluginVersion` | `zulucli` / `1.7.16` / `4.13.0` | 上报的客户端身份（取自官方 `@comate/comatecli`） |
 | `agentId` / `agentName` / `agentVersion` | `1` / `Zulu` / `12` | Zulu Agent 参数 |
 
+### 每日自动签到
+
+在 Magpie **Settings → Usage → Plugins** 打开签到开关，Magpie 会按北京时间每天为已登录账号调用签到，失败后稍后重试；插件不另设定时器。积分以服务端实际到账差额为准，结果显示在账号卡片和 Magpie 日志中。
+
+Comate license 不能用于签到接口。请用**同一百度账号**登录百度搭子桌面端，插件会只读复用本机登录态（Windows：`%APPDATA%/qianfan-desktop-app`；macOS：`~/Library/Application Support/qianfan-desktop-app`；Linux：`${XDG_CONFIG_HOME:-~/.config}/qianfan-desktop-app`；可用 `DUMATE_USER_DATA_DIR` 覆盖）。也可以设置优先使用的 `checkinCookie` 选项：
+
+```bash
+magpie plugin options magpie-comate '{"checkinCookie":"<完整 Cookie 请求头>"}'
+```
+
+在 `console.bce.baidu.com` 登录后，从浏览器开发者工具 Network 复制请求头的完整 Cookie（必须包含 `bce-sessionid`，不要用 `document.cookie`，它读不到 httpOnly 登录凭据）。Cookie 过期后需重新登录或更新选项。签到归属于 Cookie 对应的百度账号，多个 Comate 账号不会自动匹配不同桌面账号。
+
+`checkinCookie` 是敏感登录凭据：不要公开、提交到仓库或粘贴到日志；选项不同于 license 的专用凭据存储，命令也可能进入 shell 历史，建议优先使用桌面登录态。设置选项会整体覆盖原有 JSON，请保留其他需要的字段。插件不会记录 Cookie。
+
 ### 7. 更新 / 停用 / 卸载
 
 ```bash
