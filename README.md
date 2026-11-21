@@ -209,6 +209,12 @@ magpie plugin options magpie-comate '{"checkinCookie":"<完整 Cookie 请求头>
 
 签到 Cookie 是敏感登录凭据：不要公开、提交到仓库或粘贴到日志。Cookie 登录会将含 `bce-sessionid` 的 Cookie 与 license 一起保存在 Magpie 的账号凭据文件中（并非加密保险库）；也可只用桌面登录态。插件选项不同于账号凭据存储，命令可能进入 shell 历史；设置选项会整体覆盖原有 JSON，请保留其他需要的字段。插件不会记录 Cookie。
 
+### 积分查询与显示
+
+账号卡片（Magpie **Usage** 页与菜单栏账号区）会显示百度搭子积分额度：插件通过 `auth.usage` 读取 `dumate.baidu.com/api/dumate/points/quota_overview`，展示总积分、已用量、套餐（如 Dumate Pro）与到期时间、账户昵称，以及各积分包最早的过期时间与将损失的积分数。积分窗口按「已用 / 总量」计，签到与订阅赠送的积分包各自独立过期，界面以 runsOut 提示最近一次清零。
+
+积分归属于百度搭子账号而非 Comate license：只有 Cookie 登录（`metadata.checkinCookie`）或本地获取方式留下了百度登录态的账号才有积分可查；纯 license 登录的账号卡片会提示需要百度搭子登录态。凭据来源与签到相同：插件选项 `checkinCookie` > 账号 metadata > 桌面端登录态；含 `BDUSS` 走网页端接口，只有 `bce-sessionid` 时走控制台接口。登录态过期时卡片标记需要重新登录。
+
 ### 7. 更新 / 停用 / 卸载
 
 ```bash

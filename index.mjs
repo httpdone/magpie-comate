@@ -27,6 +27,7 @@
  */
 import { createClient, ComateError, redact, resolveConfig } from './lib/comate.mjs'
 import { checkin, readDesktopCookies } from './lib/checkin.mjs'
+import { dumateUsage } from './lib/usage.mjs'
 import { handleChatCompletions } from './lib/handler.mjs'
 import { toMagpieModel } from './lib/translate.mjs'
 import { createSessionStore, SESSION_DEFAULTS } from './lib/sessions.mjs'
@@ -247,6 +248,7 @@ export const ComateAuthPlugin = async (_input, options) => {
       provider: PROVIDER,
       maxConcurrency: 2,
       checkin: (getAuth) => checkin(getAuth, { options: opts, fetchImpl: opts.fetchImpl }),
+      usage: (getAuth, _provider, ctx) => dumateUsage(getAuth, { options: opts, fetchImpl: opts.fetchImpl, signal: ctx?.signal }),
       methods: [
         {
           type: 'oauth',
@@ -326,4 +328,4 @@ export const ComateAuthPlugin = async (_input, options) => {
 }
 
 // Test surface (not a plugin function; the host calls every exported function).
-export const _internal = { makeFetch, makeSessions, modelCache, PROVIDER, BASE, signInStep, checkLicense, licensePage, licenseFromCookie, localDesktopSignIn }
+export const _internal = { makeFetch, makeSessions, modelCache, PROVIDER, BASE, signInStep, checkLicense, licensePage, licenseFromCookie, localDesktopSignIn, dumateUsage }
