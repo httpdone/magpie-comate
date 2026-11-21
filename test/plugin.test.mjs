@@ -37,7 +37,7 @@ test('config hook declares the provider without overwriting user config', async 
 test('sign-in opens the Comate license page, then takes and checks the pasted license', async () => {
   const be = useBackend()
   const hooks = await mod.ComateAuthPlugin({}, undefined)
-  assert.equal(hooks.auth.methods.length, 3)
+  assert.equal(hooks.auth.methods.length, 4)
   const m = hooks.auth.methods[1]
   assert.equal(m.type, 'oauth')
   assert.ok(m.labels.zh)
@@ -105,6 +105,7 @@ test('third method is a masked Cookie/license form with Chinese method labels', 
     '百度 Cookie（打开百度搭子复制）',
     'Comate license（从个人中心复制）',
     '百度 Cookie / license（密码表单，不打开网页）',
+    '本地获取（百度搭子桌面端）',
   ])
   const form = hooks.auth.methods[2]
   assert.equal(form.type, 'api')
@@ -143,6 +144,71 @@ test('masked form rejects empty inputs and returns credential-safe errors', asyn
     assert.doesNotMatch(result.error, /fake-passport|fake-session/)
     assert.equal(result.metadata, undefined)
   }
+})
+
+test('local method is a keyless api method backed by the desktop cookie jar', async () => {
+  const hooks = await mod.ComateAuthPlugin({}, { fetchImpl: () => assert.fail('no request before authorize') })
+  const local = hooks.auth.methods[3]
+  assert.equal(local.type, 'api')
+  assert.equal(local.keyless, true)
+  assert.equal(local.prompts, undefined)
+  assert.ok(local.labels.zh)
+  const result = await local.authorize()
+  assert.equal(result.type, 'failed')
+  assert.match(result.error, /桌面端/)
+})
+
+test('localDesktopSignIn trades desktop BDUSS for a license and keeps the jar for check-in', async () => {
+  const jar = [
+    { name: 'BDUSS', value: 'fake-passport', domain: '.baidu.com' },
+    { name: 'bce-sessionid', value: 'fake-session', domain: '.bce.baidu.com' },
+    { name: 'bce-user-info', value: 'fake-csrf', domain: '.bce.baidu.com' },
+    { name: 'empty', value: ' ', domain: '.baidu.com' },
+    { name: 'noname' },
+  ]
+  const calls = []
+  const ctl = new AbortController()
+  const opts = {
+    fetchImpl: async (url, init) => {
+      calls.push({ url, ...init })
+      return Response.json(url.endsWith('/api/user') ? { status: 'OK', data: { license: ` ${LICENSE} ` } } : { data: true })
+    },
+  }
+  const result = await mod._internal.localDesktopSignIn(opts, { signal: ctl.signal, desktopCookies: () => jar })
+  assert.deepEqual(result, {
+    type: 'success', key: LICENSE,
+    metadata: { checkinCookie: 'BDUSS=fake-passport; bce-sessionid=fake-session; bce-user-info=fake-csrf' },
+  })
+  assert.deepEqual(calls.map((c) => c.url), ['https://comate.baidu.com/api/user', `https://comate.baidu.com/api/key/valid/${LICENSE}`])
+  assert.equal(calls[0].headers.Cookie, 'BDUSS=fake-passport; bce-sessionid=fake-session; bce-user-info=fake-csrf')
+  assert.equal(calls[0].signal, ctl.signal)
+})
+
+test('localDesktopSignIn without bce-sessionid signs in without check-in metadata', async () => {
+  const opts = { fetchImpl: async (url) => Response.json(url.endsWith('/api/user') ? { status: 'OK', data: { license: LICENSE } } : { data: true }) }
+  const result = await mod._internal.localDesktopSignIn(opts, { desktopCookies: () => [{ name: 'BDUSS', value: 'fake-passport' }] })
+  assert.deepEqual(result, { type: 'success', key: LICENSE })
+})
+
+test('localDesktopSignIn fails cleanly on missing jar, missing BDUSS and upstream errors', async () => {
+  const opts = { fetchImpl: () => assert.fail('no request expected') }
+  for (const desktopCookies of [() => [], () => [{ name: 'bce-sessionid', value: 'fake-session' }], () => null, () => 'nope']) {
+    const result = await mod._internal.localDesktopSignIn(opts, { desktopCookies })
+    assert.equal(result.type, 'failed')
+  }
+  const result = await mod._internal.localDesktopSignIn({
+    fetchImpl: async (url) => {
+      if (url.endsWith('/api/user')) return Response.json({ status: 'OK', data: { license: LICENSE } })
+      throw new Error(`${LICENSE} fake-passport fake-session`)
+    },
+  }, { desktopCookies: () => [{ name: 'BDUSS', value: 'fake-passport' }, { name: 'bce-sessionid', value: 'fake-session' }] })
+  assert.equal(result.type, 'failed')
+  assert.equal(result.metadata, undefined)
+  assert.ok(!result.error.includes(LICENSE))
+  assert.doesNotMatch(result.error, /fake-passport|fake-session/)
+  const badUser = await mod._internal.localDesktopSignIn({ fetchImpl: async () => Response.json({ status: 'UNAUTHORIZED' }) }, { desktopCookies: () => [{ name: 'BDUSS', value: 'fake-passport' }] })
+  assert.equal(badUser.type, 'failed')
+  assert.match(badUser.error, /桌面端/)
 })
 
 test('Cookie sign-in requires a nonempty Cookie containing BDUSS', async () => {

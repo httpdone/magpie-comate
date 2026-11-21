@@ -4,7 +4,8 @@
  * magpie sends this provider OpenAI Chat Completions (npm "@ai-sdk/openai-compatible");
  * the loader's fetch answers them with Comate's agent API (see lib/handler.mjs).
  *
- * Sign-in: two "oauth" methods of the "code" kind, plus a masked Cookie/license form.
+ * Sign-in: two "oauth" methods of the "code" kind, a masked Cookie/license form,
+ * and a keyless method that reads the Dumate desktop app's login state.
  * Cookie login opens Dumate and keeps the license key and optional check-in Cookie metadata.
  * License login opens Comate's 个人中心
  * (https://comate.baidu.com/zh/user, or options.licenseUrl) where the user copies the
@@ -25,7 +26,7 @@
  *                  "mcp" (experimental): tools exposed as one MCP server, called via Comate's use_mcp_tool
  */
 import { createClient, ComateError, redact, resolveConfig } from './lib/comate.mjs'
-import { checkin } from './lib/checkin.mjs'
+import { checkin, readDesktopCookies } from './lib/checkin.mjs'
 import { handleChatCompletions } from './lib/handler.mjs'
 import { toMagpieModel } from './lib/translate.mjs'
 import { createSessionStore, SESSION_DEFAULTS } from './lib/sessions.mjs'
@@ -158,6 +159,20 @@ async function checkLicense(input, opts, signal) {
   }
 }
 
+/** GET {host}/api/user with a Cookie header; returns the account's Comate license or throws. */
+async function licenseFromCookie(cookie, opts, signal) {
+  const { host } = resolveConfig(opts)
+  const f = opts.fetchImpl ?? ((...args) => globalThis.fetch(...args))
+  const res = await f(host + '/api/user', {
+    headers: { Cookie: cookie, Accept: 'application/json', 'Content-Type': 'application/json', Referer: host + '/zh/user' },
+    redirect: 'manual',
+    signal: signal ?? AbortSignal.timeout(20_000),
+  })
+  const payload = await res.json()
+  if (!res.ok || payload?.status !== 'OK' || typeof payload.data?.license !== 'string' || !payload.data.license.trim()) throw new Error()
+  return payload.data.license.trim()
+}
+
 async function signInForm(inputs = {}, opts, signal) {
   const cookie = String(inputs.cookie ?? '').trim()
   let license = String(inputs.license ?? '').trim()
@@ -169,16 +184,7 @@ async function signInForm(inputs = {}, opts, signal) {
   if (!license) {
     if (!hasCookie('BDUSS')) return { type: 'failed', error: '自动获取 license 需要含非空 BDUSS 的百度 Cookie，或手动填写 Comate license' }
     try {
-      const { host } = resolveConfig(opts)
-      const f = opts.fetchImpl ?? ((...args) => globalThis.fetch(...args))
-      const res = await f(host + '/api/user', {
-        headers: { Cookie: cookie, Accept: 'application/json', 'Content-Type': 'application/json', Referer: host + '/zh/user' },
-        redirect: 'manual',
-        signal: signal ?? AbortSignal.timeout(20_000),
-      })
-      const payload = await res.json()
-      if (!res.ok || payload?.status !== 'OK' || typeof payload.data?.license !== 'string' || !payload.data.license.trim()) throw new Error()
-      license = payload.data.license.trim()
+      license = await licenseFromCookie(cookie, opts, signal)
     } catch {
       return { type: 'failed', error: '无法通过百度 Cookie 获取 Comate license，请更新 Cookie 或手动填写 license' }
     }
@@ -186,6 +192,33 @@ async function signInForm(inputs = {}, opts, signal) {
   const result = await checkLicense(license, opts, signal)
   if (result.type === 'failed') return { type: 'failed', error: 'Comate license 校验失败，请检查 license、网络与服务地址后重试' }
   return hasCookie('bce-sessionid') ? { ...result, metadata: { checkinCookie: cookie } } : result
+}
+
+/**
+ * Keyless sign-in: read the Baidu Dumate desktop app's decrypted cookie jar
+ * (lib/checkin.mjs readDesktopCookies), trade its BDUSS for the Comate license
+ * via /api/user, and keep the jar as the daily check-in credential when it
+ * carries a bce-sessionid — same outcome as pasting the cookies by hand.
+ */
+async function localDesktopSignIn(opts, { signal, desktopCookies = readDesktopCookies } = {}) {
+  let raw
+  try { raw = await desktopCookies() } catch { raw = null }
+  const jar = (Array.isArray(raw) ? raw : []).filter((c) => c && typeof c.name === 'string' && typeof c.value === 'string' && c.value.trim())
+  if (!jar.length) {
+    return { type: 'failed', error: '没有找到百度搭子桌面端的登录态：请先安装并登录百度搭子桌面版（dumate.cn/download），或改用其它登录方式' }
+  }
+  const has = (name) => jar.some((c) => c.name === name && c.value.replace(/^["']+|["']+$/g, '').trim())
+  if (!has('BDUSS')) return { type: 'failed', error: '百度搭子桌面端登录态缺少 BDUSS，请在桌面版重新登录后再试' }
+  const cookie = jar.map((c) => `${c.name}=${c.value}`).join('; ')
+  let license
+  try {
+    license = await licenseFromCookie(cookie, opts, signal)
+  } catch {
+    return { type: 'failed', error: '无法通过百度搭子桌面端登录态获取 Comate license，请改用 Cookie 或 license 登录' }
+  }
+  const result = await checkLicense(license, opts, signal)
+  if (result.type === 'failed') return { type: 'failed', error: 'Comate license 校验失败，请检查桌面端登录态、网络与服务地址后重试' }
+  return has('bce-sessionid') ? { ...result, metadata: { checkinCookie: cookie } } : result
 }
 
 /** In-memory conversation cache, unless turned off with {"sessionReuse": false}. */
@@ -248,6 +281,15 @@ export const ComateAuthPlugin = async (_input, options) => {
           ],
           authorize: (inputs, { signal } = {}) => signInForm(inputs, opts, signal),
         },
+        {
+          // No prompts and no key field (keyless): magpie calls authorize directly,
+          // which reads the Dumate desktop app's login state and supplies the license.
+          type: 'api',
+          keyless: true,
+          label: '本地获取（百度搭子桌面端）',
+          labels: { zh: '本地获取（百度搭子桌面端）', 'zh-TW': '本機獲取（百度搭子桌面端）' },
+          authorize: (_inputs, { signal } = {}) => localDesktopSignIn(opts, { signal }),
+        },
       ],
       async loader(getAuth) {
         const auth = await getAuth()
@@ -284,4 +326,4 @@ export const ComateAuthPlugin = async (_input, options) => {
 }
 
 // Test surface (not a plugin function; the host calls every exported function).
-export const _internal = { makeFetch, makeSessions, modelCache, PROVIDER, BASE, signInStep, checkLicense, licensePage }
+export const _internal = { makeFetch, makeSessions, modelCache, PROVIDER, BASE, signInStep, checkLicense, licensePage, licenseFromCookie, localDesktopSignIn }

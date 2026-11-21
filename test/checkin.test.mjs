@@ -59,25 +59,41 @@ test('claim verifies issuance and calculates actual delta with console POST head
   assert.equal(post.headers.Accept, 'application/json')
 })
 
-test('session-only Cookie skips PC silently without csrf and makes no requests', async () => {
-  const m = mock([], {})
+test('session-only Cookie probes user info to heal csrf, then skips PC when it fails', async () => {
+  const m = mock([new Error('no user info')], {})
   const result = await m.run(async () => ({ type: 'api', key: 'fake-license', metadata: { checkinCookie: 'bce-sessionid=fake-session' } }))
   assert.equal(result.outcome, 'inactive')
-  assert.equal(m.calls.length, 0)
+  assert.equal(m.calls.length, 1)
+  assert.equal(m.calls[0].url, 'https://console.bce.baidu.com/api/dumate/user/info')
 })
 
-test('web claims with pasted Cookie and web headers while PC is skipped without csrf', async () => {
+test('missing bce-user-info is minted from bceAccountId and PC check-in proceeds', async () => {
+  const m = mock([
+    { bceAccountId: 'acct-123' },
+    { hasIssued: false, totalPoints: 100 }, {},
+    { hasIssued: true, totalPoints: 400, totalTimes: 2 },
+  ], { checkinCookie: 'bce-sessionid=fake-session' })
+  const result = await m.run()
+  assert.equal(result.outcome, 'claimed')
+  assert.equal(result.credit, 300)
+  const post = m.calls[2]
+  assert.equal(post.url, 'https://console.bce.baidu.com/api/dumate/points/loginBonus')
+  assert.equal(post.headers.csrftoken, 'acct-123')
+  assert.match(post.headers.Cookie, /bce-user-info=acct-123/)
+})
+
+test('web claims with pasted Cookie and web headers while PC is skipped when csrf cannot be healed', async () => {
   const pasted = 'BDUSS=fake-passport=; bce-sessionid=fake-session; BAIDUID=fake-id'
-  const m = mock([{ hasIssued: false, totalPoints: 10 }, true, { hasIssued: true, totalPoints: 210 }], {})
+  const m = mock([{}, { hasIssued: false, totalPoints: 10 }, true, { hasIssued: true, totalPoints: 210 }], {})
   const result = await m.run(async () => ({ type: 'api', key: 'fake-license', metadata: { checkinCookie: pasted } }))
   assert.equal(result.outcome, 'claimed')
   assert.equal(result.credit, 200)
   assert.match(result.message, /网页端.*\+200/)
   assert.doesNotMatch(result.message, /PC/)
-  assert.equal(m.calls.length, 3)
-  const id = m.calls[0].headers['x-dumate-device-id']
+  assert.equal(m.calls.length, 4)
+  const id = m.calls[1].headers['x-dumate-device-id']
   assert.match(id, /^1\|web\.[0-9a-f-]{36}$/)
-  for (const call of m.calls) {
+  for (const call of m.calls.slice(1)) {
     assert.ok(call.url.startsWith('https://dumate.baidu.com/api/dumate/points/loginBonus'))
     assert.equal(call.headers.Cookie, pasted)
     assert.equal(call.headers.Origin, 'https://dumate.baidu.com')
@@ -89,8 +105,8 @@ test('web claims with pasted Cookie and web headers while PC is skipped without 
     assert.equal(call.headers['x-dumate-device-id'], id)
     assert.equal(call.headers.csrftoken, undefined)
   }
-  assert.equal(m.calls[1].body, '{}')
-  assert.equal(m.calls[1].method, 'POST')
+  assert.equal(m.calls[2].body, '{}')
+  assert.equal(m.calls[2].method, 'POST')
 })
 
 test('web already done uses one status GET; BDUSS-only option is sufficient', async () => {
@@ -273,7 +289,7 @@ test('Comate plugin exposes checkin without changing license auth', async () => 
   const hooks = await ComateAuthPlugin({}, { checkinCookie: 'invalid' })
   assert.equal(typeof hooks.auth.checkin, 'function')
   assert.equal((await hooks.auth.checkin(auth)).outcome, 'failed')
-  assert.equal(hooks.auth.methods.length, 3)
+  assert.equal(hooks.auth.methods.length, 4)
 })
 
 test('desktop cookie decryption and discovery on each OS, override and corrupt data', () => {

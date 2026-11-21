@@ -126,11 +126,18 @@ magpie plugin login comate
 - 只填 Cookie 时通过 `/api/user` 自动获取 license（需要非空 `BDUSS`）；填写 license 时直接校验，不调用 `/api/user`。
 - Cookie 含非空 `bce-sessionid` 时保存到账号的 `metadata.checkinCookie`；否则不保存 Cookie，签到回退到桌面端（插件选项仍优先）。
 
-在 magpie 窗口里（桌面版或 `magpie web`）点 comate 的登录按钮，可选择同样三种方式。旧账号无需重新登录，只有需要保存账号专属签到 Cookie 时才需重新登录选择 Cookie 方式或密码表单。
+第四项 **本地获取（百度搭子桌面端）** 一键登录，不用复制任何东西：
+
+- 直接读取本机百度搭子桌面版（`qianfan-desktop-app`）的登录态（只读解密，不改动 App 任何文件），用其中的 `BDUSS` 经 `/api/user` 换取 license 并校验。
+- 桌面端登录态含 `bce-sessionid` 时，整份 Cookie 同样保存为签到凭据，签到无需再配置。
+- 需要先在本机安装并登录百度搭子桌面版；没有桌面端或登录态失效时会提示改用其它方式。
+
+在 magpie 窗口里（桌面版或 `magpie web`）点 comate 的登录按钮，可选择同样四种方式。旧账号无需重新登录，只有需要保存账号专属签到 Cookie 时才需重新登录选择 Cookie 方式或密码表单。
 
 注意：
 
 - 前两种方式使用的 `Code:` 输入框都不是密码框，终端可能**显示**粘贴的 Cookie 或 license。希望隐藏输入时请选择第三种密码表单；请勿把凭据粘贴到命令参数或日志中。
+- 第四种方式不经手任何凭据，但读取的是本机桌面端的登录密钥文件，等价于用你本机的百度账号登录，请确认本机环境可信。
 - license 由 magpie 保存在 `~/.config/magpie/plugin-auth.json`（权限 600），作为该账号的 key；
   **不会写进本项目目录，不进日志，也不会出现在错误信息里**（会被替换成 `***`）。`magpie providers` 里只显示末四位。
 - 换 license：`magpie plugin logout comate` 后重新 login。
@@ -190,7 +197,7 @@ magpie plugin options ~/tools/magpie-comate '{"host":"https://comate.baidu.com",
 
 Comate license 不能用于签到接口。推荐选择 Cookie 登录并粘贴含非空 `bce-sessionid` 的百度 Cookie，保存在该账号的 `metadata.checkinCookie`；不要求包含 `bce-user-info`。签到凭据优先级为：**插件选项 `checkinCookie` > 账号 metadata 中的签到 Cookie > 百度搭子桌面端登录态**；旧账号没有 metadata 时仍可使用桌面端。显式配置但无效的签到 Cookie 会报错，不会悄悄切换账号。
 
-Cookie 含 `BDUSS` 时签到网页端（`dumate.baidu.com`）；同时有 `bce-sessionid` 与 `bce-user-info`（CSRF）时才签到 PC 端（`console.bce.baidu.com`），缺少 CSRF 会自动跳过 PC 端，不再误报过期。两端领取状态独立，通常网页端 200 积分、PC 端额外 300 积分，实际以服务端为准；结果分别显示两端状态，新增积分相加。一端失败不影响另一端领取；全部失败才报告失败，全部已领才报告今日已签到。
+Cookie 含 `BDUSS` 时签到网页端（`dumate.baidu.com`）；含 `bce-sessionid` 时签到 PC 端（`console.bce.baidu.com`）——csrftoken 就是 `bce-user-info` 的值（等于 BCE 账户 ID），Cookie 里缺它时插件会先用会话查 `/api/dumate/user/info` 拿到账户 ID 自动补齐，补齐失败才跳过 PC 端，不再误报过期。两端领取状态独立，通常网页端 200 积分、PC 端额外 300 积分，实际以服务端为准；结果分别显示两端状态，新增积分相加。一端失败不影响另一端领取；全部失败才报告失败，全部已领才报告今日已签到。
 
 使用手动 license 登录，或 Cookie 不含 `bce-sessionid` 时，请用**同一百度账号**登录百度搭子桌面端，插件会只读复用本机登录态（Windows：`%APPDATA%/qianfan-desktop-app`；macOS：`~/Library/Application Support/qianfan-desktop-app`；Linux：`${XDG_CONFIG_HOME:-~/.config}/qianfan-desktop-app`；可用 `DUMATE_USER_DATA_DIR` 覆盖）。也可以设置优先使用的 `checkinCookie` 选项：
 
@@ -320,7 +327,7 @@ comate/minimax-m3_<hash>               MiniMax M3
 
 | 文件 | 作用 |
 | --- | --- |
-| `index.mjs` | magpie/OpenCode 插件入口：provider 声明、license 登录（打开个人中心 → 粘贴 → 校验）、模型列表、loader fetch |
+| `index.mjs` | magpie/OpenCode 插件入口：provider 声明、license 登录（Cookie / 个人中心 / 密码表单 / 桌面端本地获取）、模型列表、loader fetch |
 | `lib/comate.mjs` | Comate 后端客户端：鉴权头、校验、模型、会话/任务、`execute` SSE 解析、错误映射与脱敏 |
 | `lib/models.mjs` | 模型参数：全部取自接口（上下文 K→tokens、思考/档位/倍率），请求档位 → `thinkingEnabled`/`effort` |
 | `lib/translate.mjs` | OpenAI ⇄ Comate：transcript、工具 XML 约定、原生工具调用收集、模型映射 |
