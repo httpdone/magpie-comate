@@ -59,6 +59,16 @@ test('claim verifies issuance and calculates actual delta with console POST head
   assert.equal(post.headers.Accept, 'application/json')
 })
 
+test('pasted session-only Cookie claims without bce-user-info or a domain attribute', async () => {
+  const m = mock([{ hasIssued: false, totalPoints: 10 }, {}, { hasIssued: true, totalPoints: 20 }], {})
+  const result = await m.run(async () => ({ type: 'api', key: 'fake-license', metadata: { checkinCookie: 'bce-sessionid=fake-session' } }))
+  assert.equal(result.outcome, 'claimed')
+  assert.equal(result.credit, 10)
+  assert.equal(m.calls.length, 3)
+  assert.ok(m.calls.every((call) => call.headers.Cookie === 'bce-sessionid=fake-session'))
+  assert.equal(m.calls[1].headers.csrftoken, '')
+})
+
 test('POST accepted but no issuance is inactive, including failed verification', async () => {
   for (const after of [{ hasIssued: false }, new Error('verification unavailable')]) {
     const m = mock([{ hasIssued: false }, {}, after])

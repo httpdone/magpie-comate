@@ -23,7 +23,7 @@
  *   toolMode       "xml" (default): tools described as an XML text convention;
  *                  "mcp" (experimental): tools exposed as one MCP server, called via Comate's use_mcp_tool
  */
-import { createClient, ComateError, redact } from './lib/comate.mjs'
+import { createClient, ComateError, redact, resolveConfig } from './lib/comate.mjs'
 import { checkin } from './lib/checkin.mjs'
 import { handleChatCompletions } from './lib/handler.mjs'
 import { toMagpieModel } from './lib/translate.mjs'
@@ -158,16 +158,33 @@ async function checkLicense(input, opts, signal) {
 }
 
 async function signInForm(inputs = {}, opts, signal) {
-  const cookie = String(inputs.checkinCookie ?? '').trim()
-  if (cookie && !cookie.split(';').some((part) => {
+  const cookie = String(inputs.cookie ?? '').trim()
+  let license = String(inputs.license ?? '').trim()
+  if (!cookie && !license) return { type: 'failed', error: '请至少填写百度 Cookie 或 Comate license 其中一项' }
+  const hasCookie = (name) => cookie.split(';').some((part) => {
     const i = part.indexOf('=')
-    return part.slice(0, i).trim() === 'bce-sessionid' && part.slice(i + 1).trim().replace(/^["']|["']$/g, '').trim()
-  })) {
-    return { type: 'failed', error: '签到 Cookie 必须包含非空的 bce-sessionid，请复制 console.bce.baidu.com 的完整 Cookie 请求头' }
+    return i > 0 && part.slice(0, i).trim() === name && part.slice(i + 1).trim().replace(/^["']|["']$/g, '').trim()
+  })
+  if (!license) {
+    if (!hasCookie('BDUSS')) return { type: 'failed', error: '自动获取 license 需要含非空 BDUSS 的百度 Cookie，或手动填写 Comate license' }
+    try {
+      const { host } = resolveConfig(opts)
+      const f = opts.fetchImpl ?? ((...args) => globalThis.fetch(...args))
+      const res = await f(host + '/api/user', {
+        headers: { Cookie: cookie, Accept: 'application/json', 'Content-Type': 'application/json', Referer: host + '/zh/user' },
+        redirect: 'manual',
+        signal: signal ?? AbortSignal.timeout(20_000),
+      })
+      const payload = await res.json()
+      if (!res.ok || payload?.status !== 'OK' || typeof payload.data?.license !== 'string' || !payload.data.license.trim()) throw new Error()
+      license = payload.data.license.trim()
+    } catch {
+      return { type: 'failed', error: '无法通过百度 Cookie 获取 Comate license，请更新 Cookie 或手动填写 license' }
+    }
   }
-  const result = await checkLicense(inputs.license, opts, signal)
+  const result = await checkLicense(license, opts, signal)
   if (result.type === 'failed') return { type: 'failed', error: 'Comate license 校验失败，请检查 license、网络与服务地址后重试' }
-  return result.type === 'success' && cookie ? { ...result, metadata: { checkinCookie: cookie } } : result
+  return hasCookie('bce-sessionid') ? { ...result, metadata: { checkinCookie: cookie } } : result
 }
 
 /** In-memory conversation cache, unless turned off with {"sessionReuse": false}. */
@@ -210,8 +227,8 @@ export const ComateAuthPlugin = async (_input, options) => {
           type: 'api',
           label: 'License 与签到 Cookie（密码表单）',
           prompts: [
-            { type: 'password', key: 'license', message: 'Comate license（必填）', validate: (value) => String(value ?? '').trim() ? undefined : '请填写 Comate license' },
-            { type: 'password', key: 'checkinCookie', message: '签到 Cookie（console.bce.baidu.com，含 bce-sessionid，可选）', placeholder: '留空 = 复用百度搭子桌面端登录' },
+            { type: 'password', key: 'cookie', message: '百度 Cookie（dumate.baidu.com 登录后复制，含 BDUSS 与 bce-sessionid）', placeholder: '可选；留空可手动填写 license 并复用百度搭子桌面端签到' },
+            { type: 'password', key: 'license', message: 'Comate license（填了 Cookie 可留空，自动获取）', placeholder: '可选；Cookie 与 license 至少填写一项' },
           ],
           authorize: (inputs, { signal } = {}) => signInForm(inputs, opts, signal),
         },

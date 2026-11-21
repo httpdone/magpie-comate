@@ -99,7 +99,7 @@ magpie plugin
 #   comate (文心快码 Comate, 1 models)  not signed in · magpie plugin login comate
 ```
 
-### 3. 登录（license 与可选签到 Cookie）
+### 3. 登录（百度 Cookie 或 license）
 
 ```bash
 magpie plugin login comate
@@ -107,9 +107,10 @@ magpie plugin login comate
 
 推荐选择 **License 与签到 Cookie（密码表单）**：
 
-1. 打开 [Baidu Comate · 个人中心](https://comate.baidu.com/zh/user)，复制 license，填入第一个密码框（必填，仅接受 license，不是百度 Cookie）。
-2. 第二个密码框可填写 `console.bce.baidu.com` 的完整 Cookie 请求头（必须含非空 `bce-sessionid`）；留空则签到时复用百度搭子桌面端登录。两个字段均隐藏输入。
-3. 插件通过 `GET /api/key/valid/<license>` 校验后，仍将 license 保存为账号的 key；仅将可选签到 Cookie 保存到该账号的 `metadata.checkinCookie`，模型列表和聊天不变。不进行 Cookie 换取 license 或自动 SSO。
+1. 第一个密码框可填写在 [百度搭子](https://dumate.baidu.com) 登录后，从开发者工具 Network 复制的完整 Cookie 请求头（含 `BDUSS` 与 `bce-sessionid`）。
+2. 第二个密码框可填写 [Baidu Comate · 个人中心](https://comate.baidu.com/zh/user) 中的 license。两项均为可选，但至少填写一项；两个字段均隐藏输入。填写 license 时会直接使用，不再通过 Cookie 获取。
+3. license 留空时，Cookie 必须含非空 `BDUSS`，插件通过 `GET /api/user` 自动获取 license，再通过 `GET /api/key/valid/<license>` 校验；不会进行自动 SSO。
+4. license 仍保存为账号的 key，模型列表和聊天不变。Cookie 含非空 `bce-sessionid` 时，完整 Cookie 保存在该账号的 `metadata.checkinCookie`；只有 `BDUSS` 而没有 `bce-sessionid` 也可登录，但不保存 Cookie，签到回退到桌面端（插件选项仍优先）。
 
 也可以选择原有 **Comate license（自动打开个人中心复制）**，继续只用 license 登录：
 
@@ -180,7 +181,7 @@ magpie plugin options ~/tools/magpie-comate '{"host":"https://comate.baidu.com",
 
 在 Magpie **Settings → Usage → Plugins** 打开签到开关，Magpie 会按北京时间每天为已登录账号调用签到，失败后稍后重试；插件不另设定时器。积分以服务端实际到账差额为准，结果显示在账号卡片和 Magpie 日志中。
 
-Comate license 不能用于签到接口。推荐在登录的密码表单中填写签到 Cookie，保存在该账号的 `metadata.checkinCookie`。签到凭据优先级为：**插件选项 `checkinCookie` > 账号 metadata 中的签到 Cookie > 百度搭子桌面端登录态**；旧账号没有 metadata 时仍可使用桌面端。显式配置但无效的 Cookie 会报错，不会悄悄切换账号。
+Comate license 不能用于签到接口。推荐在登录的密码表单中填写含非空 `bce-sessionid` 的百度 Cookie，保存在该账号的 `metadata.checkinCookie`；不要求包含 `bce-user-info`。签到凭据优先级为：**插件选项 `checkinCookie` > 账号 metadata 中的签到 Cookie > 百度搭子桌面端登录态**；旧账号没有 metadata 时仍可使用桌面端。显式配置但无效的签到 Cookie 会报错，不会悄悄切换账号。
 
 留空时请用**同一百度账号**登录百度搭子桌面端，插件会只读复用本机登录态（Windows：`%APPDATA%/qianfan-desktop-app`；macOS：`~/Library/Application Support/qianfan-desktop-app`；Linux：`${XDG_CONFIG_HOME:-~/.config}/qianfan-desktop-app`；可用 `DUMATE_USER_DATA_DIR` 覆盖）。也可以设置优先使用的 `checkinCookie` 选项：
 
