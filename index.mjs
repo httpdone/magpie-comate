@@ -4,7 +4,9 @@
  * magpie sends this provider OpenAI Chat Completions (npm "@ai-sdk/openai-compatible");
  * the loader's fetch answers them with Comate's agent API (see lib/handler.mjs).
  *
- * Sign-in: one "oauth" method of the "code" kind. magpie opens Comate's 个人中心
+ * Sign-in: a masked license/Cookie form, or an "oauth" method of the "code" kind.
+ * The form keeps only the license key and optional check-in Cookie metadata.
+ * The code method opens Comate's 个人中心
  * (https://comate.baidu.com/zh/user, or options.licenseUrl) where the user copies the
  * license, then asks for it; the callback checks it with GET /api/key/valid/{license}
  * and magpie keeps it as the account's key in plugin-auth.json (mode 600). It never goes
@@ -147,12 +149,25 @@ async function checkLicense(input, opts, signal) {
   const key = String(input ?? '').trim()
   if (!key) return { type: 'failed', error: '没有填写 license' }
   try {
-    const ok = await createClient({ license: key, options: opts }).validate(signal)
+    const ok = await createClient({ license: key, options: opts, fetchImpl: opts.fetchImpl }).validate(signal)
     if (!ok) return { type: 'failed', error: 'Comate 说这个 license 无效' }
     return { type: 'success', key }
   } catch (e) {
     return { type: 'failed', error: redact(e?.message ?? String(e), key).slice(0, 500) }
   }
+}
+
+async function signInForm(inputs = {}, opts, signal) {
+  const cookie = String(inputs.checkinCookie ?? '').trim()
+  if (cookie && !cookie.split(';').some((part) => {
+    const i = part.indexOf('=')
+    return part.slice(0, i).trim() === 'bce-sessionid' && part.slice(i + 1).trim().replace(/^["']|["']$/g, '').trim()
+  })) {
+    return { type: 'failed', error: '签到 Cookie 必须包含非空的 bce-sessionid，请复制 console.bce.baidu.com 的完整 Cookie 请求头' }
+  }
+  const result = await checkLicense(inputs.license, opts, signal)
+  if (result.type === 'failed') return { type: 'failed', error: 'Comate license 校验失败，请检查 license、网络与服务地址后重试' }
+  return result.type === 'success' && cookie ? { ...result, metadata: { checkinCookie: cookie } } : result
 }
 
 /** In-memory conversation cache, unless turned off with {"sessionReuse": false}. */
@@ -180,7 +195,7 @@ export const ComateAuthPlugin = async (_input, options) => {
     auth: {
       provider: PROVIDER,
       maxConcurrency: 2,
-      checkin: (getAuth) => checkin(getAuth, { options: opts }),
+      checkin: (getAuth) => checkin(getAuth, { options: opts, fetchImpl: opts.fetchImpl }),
       methods: [
         {
           // An "oauth" method whose sign-in page is Comate's 个人中心: magpie opens it (a new
@@ -190,6 +205,15 @@ export const ComateAuthPlugin = async (_input, options) => {
           label: 'Comate license (copy it from your Comate account page)',
           labels: { zh: 'Comate license（自动打开个人中心复制）', 'zh-TW': 'Comate license（自動打開個人中心複製）' },
           authorize: async () => signInStep(opts),
+        },
+        {
+          type: 'api',
+          label: 'License 与签到 Cookie（密码表单）',
+          prompts: [
+            { type: 'password', key: 'license', message: 'Comate license（必填）', validate: (value) => String(value ?? '').trim() ? undefined : '请填写 Comate license' },
+            { type: 'password', key: 'checkinCookie', message: '签到 Cookie（console.bce.baidu.com，含 bce-sessionid，可选）', placeholder: '留空 = 复用百度搭子桌面端登录' },
+          ],
+          authorize: (inputs, { signal } = {}) => signInForm(inputs, opts, signal),
         },
       ],
       async loader(getAuth) {

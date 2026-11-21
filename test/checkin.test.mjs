@@ -104,6 +104,41 @@ test('option cookie is preferred over desktop without reading desktop credential
   assert.equal(m.calls[0].headers.Cookie, cookie)
 })
 
+test('account metadata cookie is used without reading desktop credentials', async () => {
+  const m = mock([{ hasIssued: true }], {}, () => assert.fail('desktop must not be read'))
+  assert.equal((await m.run(async () => ({ type: 'api', key: 'fake-license', metadata: { checkinCookie: cookie } }))).outcome, 'done')
+  assert.equal(m.calls[0].headers.Cookie, cookie)
+})
+
+test('plugin option overrides account metadata, including invalid explicit options', async () => {
+  const getAuth = async () => ({ type: 'api', key: 'fake-license', metadata: { checkinCookie: 'bce-sessionid=fake-metadata' } })
+  const m = mock([{ hasIssued: true }], { checkinCookie: cookie }, () => assert.fail('desktop must not be read'))
+  assert.equal((await m.run(getAuth)).outcome, 'done')
+  assert.equal(m.calls[0].headers.Cookie, cookie)
+  assert.equal((await mock([], { checkinCookie: 'invalid=fake' }).run(getAuth)).outcome, 'failed')
+})
+
+test('old auth without metadata falls back to desktop', async () => {
+  let reads = 0
+  const m = mock([{ hasIssued: true }], {}, () => {
+    reads++
+    return [{ name: 'bce-sessionid', value: 'fake-desktop', domain: '.bce.baidu.com' }]
+  })
+  assert.equal((await m.run()).outcome, 'done')
+  assert.equal(reads, 1)
+  assert.equal(m.calls[0].headers.Cookie, 'bce-sessionid=fake-desktop')
+})
+
+test('invalid metadata fails without desktop fallback and metadata secrets are redacted', async () => {
+  const getAuth = async () => ({ type: 'api', key: 'fake-license', metadata: { checkinCookie: cookie } })
+  const m = mock([{}, new Error('session-secret csrf:secret')], {}, () => assert.fail('no desktop fallback'))
+  const result = await m.run(getAuth)
+  assert.equal(result.outcome, 'failed')
+  assert.doesNotMatch(result.message, /session-secret|csrf:secret/)
+  const invalid = mock([], {}, () => assert.fail('no desktop fallback'))
+  assert.equal((await invalid.run(async () => ({ metadata: { checkinCookie: 'BDUSS=fake-passport' } }))).outcome, 'failed')
+})
+
 test('desktop fallback filters and quotes POST cookies by domain', async () => {
   const m = mock([{ hasIssued: false }, {}, { hasIssued: true }], {}, () => [
     { name: 'bce-sessionid', value: 'desktop', domain: '.baidu.com' },
@@ -136,7 +171,7 @@ test('Comate plugin exposes checkin without changing license auth', async () => 
   const hooks = await ComateAuthPlugin({}, { checkinCookie: 'invalid' })
   assert.equal(typeof hooks.auth.checkin, 'function')
   assert.equal((await hooks.auth.checkin(auth)).outcome, 'failed')
-  assert.equal(hooks.auth.methods.length, 1)
+  assert.equal(hooks.auth.methods.length, 2)
 })
 
 test('desktop cookie decryption and discovery on each OS, override and corrupt data', () => {
