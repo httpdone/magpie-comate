@@ -4,9 +4,9 @@
  * magpie sends this provider OpenAI Chat Completions (npm "@ai-sdk/openai-compatible");
  * the loader's fetch answers them with Comate's agent API (see lib/handler.mjs).
  *
- * Sign-in: a masked license/Cookie form, or an "oauth" method of the "code" kind.
- * The form keeps only the license key and optional check-in Cookie metadata.
- * The code method opens Comate's 个人中心
+ * Sign-in: two "oauth" methods of the "code" kind, for Cookie or license input.
+ * Cookie login opens Dumate and keeps the license key and optional check-in Cookie metadata.
+ * License login opens Comate's 个人中心
  * (https://comate.baidu.com/zh/user, or options.licenseUrl) where the user copies the
  * license, then asks for it; the callback checks it with GET /api/key/valid/{license}
  * and magpie keeps it as the account's key in plugin-auth.json (mode 600). It never goes
@@ -14,6 +14,7 @@
  *
  * Options (magpie plugin options comate '{…}'), all optional:
  *   licenseUrl     page opened at sign-in to copy the license (default https://comate.baidu.com/zh/user)
+ *   cookieUrl      page opened at Cookie sign-in (default https://dumate.baidu.com)
  *   host           Comate service, default https://comate.baidu.com (private deployments differ)
  *   ide, ideVersion, pluginVersion, agentId, agentName, agentVersion   client identity sent upstream
  *   idleTimeoutMs  abort an upstream stream silent for this long (default 300000)
@@ -215,6 +216,21 @@ export const ComateAuthPlugin = async (_input, options) => {
       checkin: (getAuth) => checkin(getAuth, { options: opts, fetchImpl: opts.fetchImpl }),
       methods: [
         {
+          type: 'oauth',
+          label: 'Baidu Cookie (open Dumate to copy it)',
+          labels: { zh: '百度 Cookie（自动打开百度搭子复制）', 'zh-TW': '百度 Cookie（自動打開百度搭子複製）' },
+          authorize: async () => {
+            const own = typeof opts.cookieUrl === 'string' ? opts.cookieUrl.trim() : ''
+            const url = /^https?:\/\//i.test(own) ? own : 'https://dumate.baidu.com'
+            return {
+              url,
+              method: 'code',
+              instructions: `正在打开百度搭子（没自动打开请手动访问 ${url}）：登录后按 F12 打开 DevTools → Network，刷新页面，选择请求，在 Request Headers 中复制完整 Cookie 请求头并粘贴到这里（含 BDUSS，签到还需 bce-sessionid）。不要用 document.cookie，它读不到 httpOnly 登录凭据。`,
+              callback: (code, { signal } = {}) => signInForm({ cookie: code }, opts, signal),
+            }
+          },
+        },
+        {
           // An "oauth" method whose sign-in page is Comate's 个人中心: magpie opens it (a new
           // tab in magpie web, the default browser from the app and `magpie plugin login`,
           // the link printed when it can't), then asks for the "code", the license copied there.
@@ -222,15 +238,6 @@ export const ComateAuthPlugin = async (_input, options) => {
           label: 'Comate license (copy it from your Comate account page)',
           labels: { zh: 'Comate license（自动打开个人中心复制）', 'zh-TW': 'Comate license（自動打開個人中心複製）' },
           authorize: async () => signInStep(opts),
-        },
-        {
-          type: 'api',
-          label: 'License 与签到 Cookie（密码表单）',
-          prompts: [
-            { type: 'password', key: 'cookie', message: '百度 Cookie（dumate.baidu.com 登录后复制，含 BDUSS 与 bce-sessionid）', placeholder: '可选；留空可手动填写 license 并复用百度搭子桌面端签到' },
-            { type: 'password', key: 'license', message: 'Comate license（填了 Cookie 可留空，自动获取）', placeholder: '可选；Cookie 与 license 至少填写一项' },
-          ],
-          authorize: (inputs, { signal } = {}) => signInForm(inputs, opts, signal),
         },
       ],
       async loader(getAuth) {

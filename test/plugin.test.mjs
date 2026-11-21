@@ -38,7 +38,7 @@ test('sign-in opens the Comate license page, then takes and checks the pasted li
   const be = useBackend()
   const hooks = await mod.ComateAuthPlugin({}, undefined)
   assert.equal(hooks.auth.methods.length, 2)
-  const m = hooks.auth.methods[0]
+  const m = hooks.auth.methods[1]
   assert.equal(m.type, 'oauth')
   assert.ok(m.labels.zh)
   assert.equal(m.prompts, undefined, 'nothing asked before the page opens')
@@ -58,9 +58,9 @@ test('sign-in opens the Comate license page, then takes and checks the pasted li
 
 test('sign-in: licenseUrl option, network error is redacted, signal is passed on', async () => {
   const hooks = await mod.ComateAuthPlugin({}, { licenseUrl: 'https://comate.example.com/user' })
-  assert.equal((await hooks.auth.methods[0].authorize()).url, 'https://comate.example.com/user')
+  assert.equal((await hooks.auth.methods[1].authorize()).url, 'https://comate.example.com/user')
   const odd = await mod.ComateAuthPlugin({}, { licenseUrl: 'javascript:alert(1)' })
-  assert.equal((await odd.auth.methods[0].authorize()).url, mod.LICENSE_PAGE)
+  assert.equal((await odd.auth.methods[1].authorize()).url, mod.LICENSE_PAGE)
   let seen
   globalThis.fetch = async (url, init) => {
     seen = init?.signal
@@ -73,43 +73,38 @@ test('sign-in: licenseUrl option, network error is redacted, signal is passed on
   assert.ok(seen, 'fetch got a signal')
 })
 
-test('masked sign-in form validates license and keeps only optional check-in metadata', async () => {
-  const calls = []
-  const ctl = new AbortController()
-  const hooks = await mod.ComateAuthPlugin({}, {
-    host: 'https://comate.example.com',
-    fetchImpl: async (url, init) => {
-      calls.push({ url, ...init })
-      return Response.json({ data: true })
-    },
-  })
-  const form = hooks.auth.methods[1]
-  assert.equal(form.type, 'api')
-  assert.deepEqual(form.prompts.map((p) => p.type), ['password', 'password'])
-  assert.deepEqual(form.prompts.map((p) => p.key), ['cookie', 'license'])
-  const cookie = 'BDUSS=fake-passport; bce-sessionid="fake-session"; bce-user-info=fake-csrf'
-  assert.deepEqual(await form.authorize({ license: ` ${LICENSE} `, cookie: ` ${cookie} ` }, { signal: ctl.signal }), {
-    type: 'success', key: LICENSE, metadata: { checkinCookie: cookie },
-  })
-  assert.deepEqual(await form.authorize({ license: LICENSE, cookie: '  ' }), { type: 'success', key: LICENSE })
-  assert.deepEqual(await form.authorize({ license: LICENSE }), { type: 'success', key: LICENSE })
-  assert.equal(calls.length, 3)
-  assert.equal(calls[0].url, `https://comate.example.com/api/key/valid/${LICENSE}`)
-  assert.equal(calls[0].signal, ctl.signal)
-  assert.ok(calls.every((c) => !JSON.stringify(c.headers).includes('fake-session')))
+test('default Cookie sign-in opens Dumate before asking for the Cookie, with safe URL override', async () => {
+  for (const [cookieUrl, expected] of [
+    [undefined, 'https://dumate.baidu.com'],
+    [' https://dumate.example.com/login ', 'https://dumate.example.com/login'],
+    ['javascript:alert(1)', 'https://dumate.baidu.com'],
+    ['', 'https://dumate.baidu.com'],
+  ]) {
+    const hooks = await mod.ComateAuthPlugin({}, { cookieUrl, fetchImpl: () => assert.fail('opening the page needs no API call') })
+    const method = hooks.auth.methods[0]
+    assert.equal(method.type, 'oauth')
+    assert.equal(method.prompts, undefined)
+    const step = await method.authorize()
+    assert.equal(step.url, expected)
+    assert.equal(step.method, 'code')
+    assert.ok(step.instructions.includes(expected))
+    assert.match(step.instructions, /登录.*DevTools → Network.*Request Headers.*Cookie/)
+    assert.match(step.instructions, /httpOnly/)
+    assert.equal(typeof step.callback, 'function')
+  }
 })
 
-test('masked sign-in requires an input and BDUSS when license is omitted', async () => {
+test('Cookie sign-in requires a nonempty Cookie containing BDUSS', async () => {
   const hooks = await mod.ComateAuthPlugin({}, { fetchImpl: () => assert.fail('no request expected') })
-  const form = hooks.auth.methods[1]
+  const step = await hooks.auth.methods[0].authorize()
   for (const cookie of ['other=fake', 'bce-sessionid=fake-session', 'BDUSS=', 'BDUSS=""', 'other=BDUSS=fake']) {
-    const result = await form.authorize({ cookie })
+    const result = await step.callback(cookie)
     assert.equal(result.type, 'failed')
     assert.match(result.error, /BDUSS/)
     assert.doesNotMatch(result.error, /fake-passport/)
   }
-  assert.equal((await form.authorize()).type, 'failed')
-  assert.match((await form.authorize({ cookie: ' ', license: ' ' })).error, /至少填写/)
+  assert.equal((await step.callback()).type, 'failed')
+  assert.equal((await step.callback(' ')).type, 'failed')
 })
 
 test('cookie-only sign-in retrieves and validates license, storing the full check-in Cookie', async () => {
@@ -123,7 +118,8 @@ test('cookie-only sign-in retrieves and validates license, storing the full chec
       return Response.json(calls.length === 1 ? { status: 'OK', data: { license: ` ${LICENSE} ` } } : { data: true })
     },
   })
-  assert.deepEqual(await hooks.auth.methods[1].authorize({ cookie }, { signal: ctl.signal }), {
+  const step = await hooks.auth.methods[0].authorize()
+  assert.deepEqual(await step.callback(` ${cookie} `, { signal: ctl.signal }), {
     type: 'success', key: LICENSE, metadata: { checkinCookie: cookie },
   })
   assert.deepEqual(calls.map((c) => c.url), ['https://comate.example.com/api/user', `https://comate.example.com/api/key/valid/${LICENSE}`])
@@ -137,20 +133,17 @@ test('cookie-only sign-in retrieves and validates license, storing the full chec
 })
 
 test('Cookie without a session signs in without persisting passport credentials', async () => {
-  for (const explicitLicense of ['', LICENSE]) {
-    const calls = []
-    const hooks = await mod.ComateAuthPlugin({}, { fetchImpl: async (url, init) => {
-      calls.push({ url, ...init })
-      return Response.json(url.endsWith('/api/user') ? { status: 'OK', data: { license: LICENSE } } : { data: true })
-    } })
-    const result = await hooks.auth.methods[1].authorize({ cookie: 'BDUSS=fake-passport; bce-sessionid=""', license: explicitLicense })
-    assert.deepEqual(result, { type: 'success', key: LICENSE })
-    assert.equal(calls.length, explicitLicense ? 1 : 2)
-    if (!explicitLicense) {
-      assert.equal(calls[0].url, 'https://comate.baidu.com/api/user')
-      assert.ok(calls[0].signal instanceof AbortSignal)
-    }
-  }
+  const calls = []
+  const hooks = await mod.ComateAuthPlugin({}, { fetchImpl: async (url, init) => {
+    calls.push({ url, ...init })
+    return Response.json(url.endsWith('/api/user') ? { status: 'OK', data: { license: LICENSE } } : { data: true })
+  } })
+  const step = await hooks.auth.methods[0].authorize()
+  const result = await step.callback('BDUSS=fake-passport; bce-sessionid=""')
+  assert.deepEqual(result, { type: 'success', key: LICENSE })
+  assert.equal(calls.length, 2)
+  assert.equal(calls[0].url, 'https://comate.baidu.com/api/user')
+  assert.ok(calls[0].signal instanceof AbortSignal)
 })
 
 test('user API failures have one generic Chinese error and never validate or persist credentials', async () => {
@@ -169,20 +162,24 @@ test('user API failures have one generic Chinese error and never validate or per
       if (response instanceof Error) throw response
       return response
     } })
-    const result = await hooks.auth.methods[1].authorize({ cookie: 'BDUSS=fake-passport; bce-sessionid=fake-session' })
+    const step = await hooks.auth.methods[0].authorize()
+    const result = await step.callback('BDUSS=fake-passport; bce-sessionid=fake-session')
     assert.deepEqual(result, { type: 'failed', error: '无法通过百度 Cookie 获取 Comate license，请更新 Cookie 或手动填写 license' })
     assert.equal(calls, 1)
   }
 })
 
-test('masked sign-in refuses invalid license and redacts credentials from network errors', async () => {
-  const cookie = 'bce-sessionid=fake-session; bce-user-info="fake-csrf"'
-  for (const fetchImpl of [
-    async () => Response.json({ data: false }),
-    async () => { throw new Error(`${LICENSE} ${cookie} fake-session fake-csrf`) },
-  ]) {
+test('Cookie sign-in refuses invalid retrieved license and redacts validation failures', async () => {
+  const cookie = 'BDUSS=fake-passport; bce-sessionid=fake-session; bce-user-info="fake-csrf"'
+  for (const fail of [false, true]) {
+    const fetchImpl = async (url) => {
+      if (url.endsWith('/api/user')) return Response.json({ status: 'OK', data: { license: LICENSE } })
+      if (fail) throw new Error(`${LICENSE} ${cookie} fake-session fake-csrf`)
+      return Response.json({ data: false })
+    }
     const hooks = await mod.ComateAuthPlugin({}, { fetchImpl })
-    const result = await hooks.auth.methods[1].authorize({ license: LICENSE, cookie })
+    const step = await hooks.auth.methods[0].authorize()
+    const result = await step.callback(cookie)
     assert.equal(result.type, 'failed')
     assert.equal(result.metadata, undefined)
     assert.ok(!result.error.includes(LICENSE))

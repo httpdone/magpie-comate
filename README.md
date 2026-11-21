@@ -56,7 +56,7 @@ OpenAI 风格的客户端每次都会重发完整历史。插件把“我们回�
 ### 1. 前提
 
 - **magpie**：本插件在 magpie `0.1.4026` 上实测（`magpie --version` 查看；旧版本先 `magpie update`）。
-  登录提供密码表单与 OpenCode 插件 oauth「code」方式；密码表单需要支持 `password` prompts 的新版 Magpie。
+  登录使用 OpenCode 插件 oauth「code」方式，分别支持百度 Cookie 与手动 license；较早的 Magpie 若不支持，请先升级。
 - **Bun 不用自己装**：magpie 第一次加载插件时会自动下载它自带的 Bun（会提示 `Downloading Bun …, which plugins run on…`）。
 - **git**：只有「从 GitHub 安装」需要。
 - **Node ≥ 18**：只在跑测试或独立代理（`bin/serve.mjs`）时需要，插件本身不需要。
@@ -105,11 +105,11 @@ magpie plugin
 magpie plugin login comate
 ```
 
-推荐选择 **License 与签到 Cookie（密码表单）**：
+默认第一项为 **百度 Cookie（自动打开百度搭子复制）**：
 
-1. 第一个密码框可填写在 [百度搭子](https://dumate.baidu.com) 登录后，从开发者工具 Network 复制的完整 Cookie 请求头（含 `BDUSS` 与 `bce-sessionid`）。
-2. 第二个密码框可填写 [Baidu Comate · 个人中心](https://comate.baidu.com/zh/user) 中的 license。两项均为可选，但至少填写一项；两个字段均隐藏输入。填写 license 时会直接使用，不再通过 Cookie 获取。
-3. license 留空时，Cookie 必须含非空 `BDUSS`，插件通过 `GET /api/user` 自动获取 license，再通过 `GET /api/key/valid/<license>` 校验；不会进行自动 SSO。
+1. Magpie 会自动打开 [百度搭子](https://dumate.baidu.com)（可用 `cookieUrl` 选项修改；没自动打开时按提示手动访问）。
+2. 登录后按 F12 打开 DevTools → Network，刷新页面，选择请求，在 Request Headers 中复制完整 Cookie 请求头的值，回到 Magpie 粘贴到 `Code:` 输入框。不要用 `document.cookie`，它读不到 httpOnly 登录凭据。
+3. 此方式只接受 Cookie，必须含非空 `BDUSS`；插件通过 `GET /api/user` 自动获取 license，再通过 `GET /api/key/valid/<license>` 校验，不会进行自动 SSO。需要手动填写 license 时请选择下面的第二种登录方式。
 4. license 仍保存为账号的 key，模型列表和聊天不变。Cookie 含非空 `bce-sessionid` 时，完整 Cookie 保存在该账号的 `metadata.checkinCookie`；只有 `BDUSS` 而没有 `bce-sessionid` 也可登录，但不保存 Cookie，签到回退到桌面端（插件选项仍优先）。
 
 也可以选择原有 **Comate license（自动打开个人中心复制）**，继续只用 license 登录：
@@ -120,11 +120,11 @@ magpie plugin login comate
 3. 回到终端，在 `Code:` 后面粘贴 license，回车。插件先用 `GET /api/key/valid/<license>` 校验，通过后显示
    `✓ signed in to 文心快码 Comate`。
 
-在 magpie 窗口里（桌面版或 `magpie web`）点 comate 的登录按钮，可选择同样两种方式。旧账号无需重新登录，只有需要保存账号专属签到 Cookie 时才需重新登录选择密码表单。
+在 magpie 窗口里（桌面版或 `magpie web`）点 comate 的登录按钮，可选择同样两种方式。旧账号无需重新登录，只有需要保存账号专属签到 Cookie 时才需重新登录选择 Cookie 方式。
 
 注意：
 
-- 原有流程的 `Code:` 这一步终端会**显示**你粘贴的内容（不是密码框）；希望隐藏输入时请选择密码表单。
+- 两种方式使用的 `Code:` 输入框都不是密码框，终端可能**显示**粘贴的 Cookie 或 license。请勿在共享屏幕或录屏时输入，也不要把内容粘贴到命令参数或日志中。
 - license 由 magpie 保存在 `~/.config/magpie/plugin-auth.json`（权限 600），作为该账号的 key；
   **不会写进本项目目录，不进日志，也不会出现在错误信息里**（会被替换成 `***`）。`magpie providers` 里只显示末四位。
 - 换 license：`magpie plugin logout comate` 后重新 login。
@@ -174,6 +174,7 @@ magpie plugin options ~/tools/magpie-comate '{"host":"https://comate.baidu.com",
 | `idleTimeoutMs` | `300000` | 上游流静默多久后中止 |
 | `host` | `https://comate.baidu.com` | Comate 服务地址（私有化部署时改这里） |
 | `licenseUrl` | `https://comate.baidu.com/zh/user` | 登录时自动打开的「复制 license」页面 |
+| `cookieUrl` | `https://dumate.baidu.com` | Cookie 登录时自动打开的页面，仅允许 HTTP(S) URL |
 | `ide` / `ideVersion` / `pluginVersion` | `zulucli` / `1.7.16` / `4.13.0` | 上报的客户端身份（取自官方 `@comate/comatecli`） |
 | `agentId` / `agentName` / `agentVersion` | `1` / `Zulu` / `12` | Zulu Agent 参数 |
 
@@ -181,9 +182,9 @@ magpie plugin options ~/tools/magpie-comate '{"host":"https://comate.baidu.com",
 
 在 Magpie **Settings → Usage → Plugins** 打开签到开关，Magpie 会按北京时间每天为已登录账号调用签到，失败后稍后重试；插件不另设定时器。积分以服务端实际到账差额为准，结果显示在账号卡片和 Magpie 日志中。
 
-Comate license 不能用于签到接口。推荐在登录的密码表单中填写含非空 `bce-sessionid` 的百度 Cookie，保存在该账号的 `metadata.checkinCookie`；不要求包含 `bce-user-info`。签到凭据优先级为：**插件选项 `checkinCookie` > 账号 metadata 中的签到 Cookie > 百度搭子桌面端登录态**；旧账号没有 metadata 时仍可使用桌面端。显式配置但无效的签到 Cookie 会报错，不会悄悄切换账号。
+Comate license 不能用于签到接口。推荐选择 Cookie 登录并粘贴含非空 `bce-sessionid` 的百度 Cookie，保存在该账号的 `metadata.checkinCookie`；不要求包含 `bce-user-info`。签到凭据优先级为：**插件选项 `checkinCookie` > 账号 metadata 中的签到 Cookie > 百度搭子桌面端登录态**；旧账号没有 metadata 时仍可使用桌面端。显式配置但无效的签到 Cookie 会报错，不会悄悄切换账号。
 
-留空时请用**同一百度账号**登录百度搭子桌面端，插件会只读复用本机登录态（Windows：`%APPDATA%/qianfan-desktop-app`；macOS：`~/Library/Application Support/qianfan-desktop-app`；Linux：`${XDG_CONFIG_HOME:-~/.config}/qianfan-desktop-app`；可用 `DUMATE_USER_DATA_DIR` 覆盖）。也可以设置优先使用的 `checkinCookie` 选项：
+使用手动 license 登录，或 Cookie 不含 `bce-sessionid` 时，请用**同一百度账号**登录百度搭子桌面端，插件会只读复用本机登录态（Windows：`%APPDATA%/qianfan-desktop-app`；macOS：`~/Library/Application Support/qianfan-desktop-app`；Linux：`${XDG_CONFIG_HOME:-~/.config}/qianfan-desktop-app`；可用 `DUMATE_USER_DATA_DIR` 覆盖）。也可以设置优先使用的 `checkinCookie` 选项：
 
 ```bash
 magpie plugin options magpie-comate '{"checkinCookie":"<完整 Cookie 请求头>"}'
@@ -191,7 +192,7 @@ magpie plugin options magpie-comate '{"checkinCookie":"<完整 Cookie 请求头>
 
 在 `console.bce.baidu.com` 登录后，从浏览器开发者工具 Network 复制请求头的完整 Cookie（必须包含 `bce-sessionid`，不要用 `document.cookie`，它读不到 httpOnly 登录凭据）。Cookie 过期后需重新登录或更新选项。签到归属于 Cookie 对应的百度账号，多个 Comate 账号不会自动匹配不同桌面账号。
 
-签到 Cookie 是敏感登录凭据：不要公开、提交到仓库或粘贴到日志。密码表单会将其与 license 一起保存在 Magpie 的账号凭据文件中（并非加密保险库）；也可只用桌面登录态。插件选项不同于账号凭据存储，命令可能进入 shell 历史；设置选项会整体覆盖原有 JSON，请保留其他需要的字段。插件不会记录 Cookie。
+签到 Cookie 是敏感登录凭据：不要公开、提交到仓库或粘贴到日志。Cookie 登录会将含 `bce-sessionid` 的 Cookie 与 license 一起保存在 Magpie 的账号凭据文件中（并非加密保险库）；也可只用桌面登录态。插件选项不同于账号凭据存储，命令可能进入 shell 历史；设置选项会整体覆盖原有 JSON，请保留其他需要的字段。插件不会记录 Cookie。
 
 ### 7. 更新 / 停用 / 卸载
 
